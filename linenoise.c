@@ -150,6 +150,9 @@ enum {
     SPECIAL_DELETE = -24,
     SPECIAL_HOME = -25,
     SPECIAL_END = -26,
+    SPECIAL_INSERT = -27,
+    SPECIAL_PAGE_UP = -28,
+    SPECIAL_PAGE_DOWN = -29
 };
 
 static int history_max_len = LINENOISE_DEFAULT_HISTORY_MAX_LEN;
@@ -471,8 +474,14 @@ static int check_special(int fd)
         c = fd_read_char(fd, 50);
         if (c == '~') {
             switch (c2) {
+                case '2':
+                    return SPECIAL_INSERT;
                 case '3':
                     return SPECIAL_DELETE;
+                case '5':
+                    return SPECIAL_PAGE_UP;
+                case '6':
+                    return SPECIAL_PAGE_DOWN;
                 case '7':
                     return SPECIAL_HOME;
                 case '8':
@@ -597,12 +606,18 @@ static int fd_read(struct current *current)
                     return SPECIAL_UP;
                  case VK_DOWN:
                     return SPECIAL_DOWN;
+                 case VK_INSERT:
+                    return SPECIAL_INSERT;
                  case VK_DELETE:
                     return SPECIAL_DELETE;
                  case VK_HOME:
                     return SPECIAL_HOME;
                  case VK_END:
                     return SPECIAL_END;
+                 case VK_PRIOR:
+                    return SPECIAL_PAGE_UP;
+                 case VK_NEXT:
+                    return SPECIAL_PAGE_DOWN;
                 }
             }
             /* Note that control characters are already translated in AsciiChar */
@@ -1002,6 +1017,11 @@ process_char:
                 refreshLine(current->prompt, current);
             }
             break;
+        case SPECIAL_INSERT:
+            /* Ignore. Expansion Hook.
+             * Future possibility: Toggle Insert/Overwrite Modes
+             */
+            break;
         case ctrl('W'):    /* ctrl-w */
             /* eat any spaces on the left */
             {
@@ -1163,26 +1183,34 @@ process_char:
                 refreshLine(current->prompt, current);
             }
             break;
+        case SPECIAL_PAGE_UP:
+          dir = history_len - history_index - 1; /* move to start of history */
+          goto history_navigation;
+        case SPECIAL_PAGE_DOWN:
+          dir = -history_index; /* move to 0 == end of history, i.e. current */
+          goto history_navigation;
         case ctrl('P'):
         case SPECIAL_UP:
             dir = 1;
+          goto history_navigation;
         case ctrl('N'):
         case SPECIAL_DOWN:
+history_navigation:
             if (history_len > 1) {
                 /* Update the current history entry before to
                  * overwrite it with tne next one. */
-                free(history[history_len-1-history_index]);
-                history[history_len-1-history_index] = strdup(current->buf);
+                free(history[history_len - 1 - history_index]);
+                history[history_len - 1 - history_index] = strdup(current->buf);
                 /* Show the new entry */
                 history_index += dir;
                 if (history_index < 0) {
                     history_index = 0;
                     break;
                 } else if (history_index >= history_len) {
-                    history_index = history_len-1;
+                    history_index = history_len - 1;
                     break;
                 }
-                set_current(current, history[history_len-1-history_index]);
+                set_current(current, history[history_len - 1 - history_index]);
                 refreshLine(current->prompt, current);
             }
             break;
