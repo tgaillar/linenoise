@@ -187,6 +187,7 @@ void linenoiseHistoryFree(void) {
             free(history[j]);
         free(history);
         history = NULL;
+        history_len = 0;
     }
 }
 
@@ -541,7 +542,7 @@ static int outputChars(struct current *current, const char *buf, int len)
 {
     COORD pos = { (SHORT)current->x, (SHORT)current->y };
     DWORD n;
-	
+
     WriteConsoleOutputCharacter(current->outh, buf, len, pos, &n);
     current->x += len;
     return 0;
@@ -1229,10 +1230,10 @@ char *linenoise(const char *prompt)
     char buf[LINENOISE_MAX_LINE];
 
     if (enableRawMode(&current) == -1) {
-	printf("%s", prompt);
+        printf("%s", prompt);
         fflush(stdout);
         if (fgets(buf, sizeof(buf), stdin) == NULL) {
-		return NULL;
+            return NULL;
         }
         count = strlen(buf);
         if (count && buf[count-1] == '\n') {
