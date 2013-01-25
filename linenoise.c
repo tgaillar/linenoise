@@ -1122,9 +1122,11 @@ process_char:
             }
             break;
         case ctrl('T'):    /* ctrl-t */
-            if (current->pos > 0 && current->pos < current->chars) {
-                c = get_char(current, current->pos);
-                remove_char(current, current->pos);
+            if (current->pos > 0 && current->pos <= current->chars) {
+                /* If cursor is at end, transpose the previous two chars */
+                int fixer = (current->pos == current->chars);
+                c = get_char(current, current->pos - fixer);
+                remove_char(current, current->pos - fixer);
                 insert_char(current, current->pos - 1, c);
                 refreshLine(current->prompt, current);
             }
