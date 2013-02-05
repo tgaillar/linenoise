@@ -1082,7 +1082,7 @@ void linenoiseAddCompletion(linenoiseCompletions *lc, const char *str) {
 
 #endif
 
-static int linenoisePrompt(struct current *current) {
+static int linenoiseEdit(struct current *current) {
     int history_index = 0;
 
     /* The latest history entry is always our current buffer, that
@@ -1421,7 +1421,7 @@ char *linenoise(const char *prompt)
         current.prompt = prompt;
         current.capture = NULL;
 
-        count = linenoisePrompt(&current);
+        count = linenoiseEdit(&current);
 
         disableRawMode(&current);
         printf("\n");
