@@ -1475,8 +1475,16 @@ int linenoiseHistorySetMaxLen(int len) {
 
         newHistory = (char **)malloc(sizeof(char*)*len);
         if (newHistory == NULL) return 0;
-        if (len < tocopy) tocopy = len;
-        memcpy(newHistory,history+(history_max_len-tocopy), sizeof(char*)*tocopy);
+
+        /* If we can't copy everything, free the elements we'll not use. */
+        if (len < tocopy) {
+            int j;
+
+            for (j = 0; j < tocopy-len; j++) free(history[j]);
+            tocopy = len;
+        }
+        memset(newHistory,0,sizeof(char*)*len);
+        memcpy(newHistory,history+(history_len-tocopy), sizeof(char*)*tocopy);
         free(history);
         history = newHistory;
     }
