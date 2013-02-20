@@ -381,6 +381,70 @@ static int fd_read(struct current *current)
 #endif
 }
 
+static int countColorControlChars(const char* prompt, int plen)
+{
+    /* ANSI color control sequences have the form:
+     * "\x1b" "[" [0-9;]+ "m"
+     * We parse them with a simple state machine.
+     */
+
+    enum {
+        search_esc,
+        expect_bracket,
+        expect_inner,
+        expect_trail
+    } state = search_esc;
+    int len, found = 0;
+    char ch;
+
+    /* XXX: Strictly we should be checking utf8 chars rather than
+     *      bytes in case of the extremely unlikely scenario where
+     *      an ANSI sequence is part of a utf8 sequence.
+     */
+    for (; plen ; plen--, prompt++) {
+        ch = *prompt;
+
+        switch (state) {
+        case search_esc:
+            len = 0;
+            if (ch == '\x1b') {
+                state = expect_bracket;
+                len++;
+            }
+            break;
+        case expect_bracket:
+            if (ch == '[') {
+                state = expect_inner;
+                len++;
+            } else {
+                state = search_esc;
+            }
+            break;
+        case expect_inner:
+            if (ch >= '0' && ch <= '9') {
+                len++;
+                state = expect_trail;
+            } else {
+                state = search_esc;
+            }
+            break;
+        case expect_trail:
+            if (ch == 'm') {
+                len++;
+                found += len;
+                state = search_esc;
+            } else if ((ch != ';') && ((ch < '0') || (ch > '9'))) {
+                state = search_esc;
+            }
+            /* 0-9, or semicolon */
+            len++;
+            break;
+        }
+    }
+
+    return found;
+}
+
 static int getWindowSize(struct current *current)
 {
     struct winsize ws;
@@ -633,6 +697,14 @@ static int fd_read(struct current *current)
     return -1;
 }
 
+static int countColorControlChars(char* prompt, int plen)
+{
+    /* For windows we assume that there are no embedded ansi color
+     * control sequences.
+     */
+    return 0;
+}
+
 static int getWindowSize(struct current *current)
 {
     CONSOLE_SCREEN_BUFFER_INFO info;
@@ -695,6 +767,11 @@ static void refreshLine(const char *prompt, struct current *current)
     plen = strlen(prompt);
     pchars = utf8_strlen(prompt, plen);
 
+    /* Scan the prompt for embedded ansi color control sequences and
+     * discount them as characters/columns.
+     */
+    pchars -= countColorControlChars(prompt, plen);
+
     /* Account for a line which is too long to fit in the window.
      * Note that control chars require an extra column
      */
@@ -711,7 +788,7 @@ static void refreshLine(const char *prompt, struct current *current)
         }
     }
 
-    /* If too many are need, strip chars off the front of 'buf'
+    /* If too many are needed, strip chars off the front of 'buf'
      * until it fits. Note that if the current char is a control character,
      * we need one extra col.
      */
