@@ -168,6 +168,7 @@ struct current {
     int pos;    /* Cursor position, measured in chars */
     int cols;   /* Size of the window, in chars */
     const char *prompt;
+    char *capture; /* Allocated capture buffer, or NULL for none. Always null terminated */
 #if defined(USE_TERMIOS)
     int fd;     /* Terminal fd */
 #elif defined(USE_WINCONSOLE)
@@ -939,15 +940,63 @@ static int insert_char(struct current *current, int pos, int ch)
 }
 
 /**
+ * Captures up to 'n' characters starting at 'pos' for the cut buffer.
+ *
+ * This replaces any existing characters in the cut buffer.
+ */
+static void capture_chars(struct current *current, int pos, int n)
+{
+    if (pos >= 0 && (pos + n - 1) < current->chars) {
+        int p1 = utf8_index(current->buf, pos);
+        int nbytes = utf8_index(current->buf + p1, n);
+
+        if (nbytes) {
+            free(current->capture);
+            /* Include space for the null terminator */
+            current->capture = (char *)malloc(nbytes + 1);
+            memcpy(current->capture, current->buf + p1, nbytes);
+            current->capture[nbytes] = '\0';
+        }
+    }
+}
+
+/**
+ * Removes up to 'n' characters at cursor position 'pos'.
+ *
  * Returns 0 if no chars were removed or non-zero otherwise.
  */
 static int remove_chars(struct current *current, int pos, int n)
 {
     int removed = 0;
+
+    /* First save any chars which will be removed */
+    capture_chars(current, pos, n);
+
     while (n-- && remove_char(current, pos)) {
         removed++;
     }
     return removed;
+}
+/**
+ * Inserts the characters (string) 'chars' at the cursor position 'pos'.
+ *
+ * Returns 0 if no chars were inserted or non-zero otherwise.
+ */
+static int insert_chars(struct current *current, int pos, const char *chars)
+{
+    int inserted = 0;
+
+    while (*chars) {
+        int ch;
+        int n = utf8_tounicode(chars, &ch);
+        if (insert_char(current, pos, ch) == 0) {
+            break;
+        }
+        inserted++;
+        pos++;
+        chars += n;
+    }
+    return inserted;
 }
 
 #ifndef NO_COMPLETION
@@ -1099,7 +1148,7 @@ process_char:
              * Future possibility: Toggle Insert/Overwrite Modes
              */
             break;
-        case ctrl('W'):    /* ctrl-w */
+        case ctrl('W'):    /* ctrl-w, delete word at left. save deleted chars */
             /* eat any spaces on the left */
             {
                 int pos = current->pos;
@@ -1301,13 +1350,18 @@ history_navigation:
             current->pos = current->chars;
             refreshLine(current->prompt, current);
             break;
-        case ctrl('U'): /* Ctrl+u, delete to beginning of line. */
+        case ctrl('U'): /* Ctrl+u, delete to beginning of line, save deleted chars. */
             if (remove_chars(current, 0, current->pos)) {
                 refreshLine(current->prompt, current);
             }
             break;
-        case ctrl('K'): /* Ctrl+k, delete from current to end of line. */
+        case ctrl('K'): /* Ctrl+k, delete from current to end of line, save deleted chars. */
             if (remove_chars(current, current->pos, current->chars - current->pos)) {
+                refreshLine(current->prompt, current);
+            }
+            break;
+        case ctrl('Y'): /* Ctrl+y, insert saved chars at current position */
+            if (current->capture && insert_chars(current, current->pos, current->capture)) {
                 refreshLine(current->prompt, current);
             }
             break;
@@ -1365,10 +1419,14 @@ char *linenoise(const char *prompt)
         current.chars = 0;
         current.pos = 0;
         current.prompt = prompt;
+        current.capture = NULL;
 
         count = linenoisePrompt(&current);
+
         disableRawMode(&current);
         printf("\n");
+
+        free(current.capture);
         if (count == -1) {
             return NULL;
         }
