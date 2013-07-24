@@ -209,7 +209,7 @@ static int isUnsupportedTerm(void) {
     if (term) {
         int j;
         for (j = 0; unsupported_term[j]; j++) {
-            if (strcasecmp(term, unsupported_term[j]) == 0) {
+            if (strcmp(term, unsupported_term[j]) == 0) {
                 return 1;
             }
         }
