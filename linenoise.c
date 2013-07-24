@@ -395,7 +395,7 @@ static int countColorControlChars(const char* prompt, int plen)
         expect_inner,
         expect_trail
     } state = search_esc;
-    int len, found = 0;
+    int len = 0, found = 0;
     char ch;
 
     /* XXX: Strictly we should be checking utf8 chars rather than
