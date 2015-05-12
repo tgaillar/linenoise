@@ -642,8 +642,11 @@ static void clearScreen(struct current *current)
 
 static void cursorToLeft(struct current *current)
 {
-    COORD pos = { 0, (SHORT)current->y };
+    COORD pos;
     DWORD n;
+
+    pos.X = 0;
+    pos.Y = (SHORT)current->y;
 
     FillConsoleOutputAttribute(current->outh,
         FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN, current->cols, pos, &n);
@@ -652,8 +655,11 @@ static void cursorToLeft(struct current *current)
 
 static int outputChars(struct current *current, const char *buf, int len)
 {
-    COORD pos = { (SHORT)current->x, (SHORT)current->y };
+    COORD pos;
     DWORD n;
+
+    pos.X = (SHORT)current->x;
+    pos.Y = (SHORT)current->y;
 
     WriteConsoleOutputCharacter(current->outh, buf, len, pos, &n);
     current->x += len;
@@ -662,8 +668,11 @@ static int outputChars(struct current *current, const char *buf, int len)
 
 static void outputControlChar(struct current *current, char ch)
 {
-    COORD pos = { (SHORT)current->x, (SHORT)current->y };
+    COORD pos;
     DWORD n;
+
+    pos.X = (SHORT) current->x;
+    pos.Y = (SHORT) current->y;
 
     FillConsoleOutputAttribute(current->outh, BACKGROUND_INTENSITY, 2, pos, &n);
     outputChars(current, "^", 1);
@@ -672,15 +681,21 @@ static void outputControlChar(struct current *current, char ch)
 
 static void eraseEol(struct current *current)
 {
-    COORD pos = { (SHORT)current->x, (SHORT)current->y };
+    COORD pos;
     DWORD n;
+
+    pos.X = (SHORT) current->x;
+    pos.Y = (SHORT) current->y;
 
     FillConsoleOutputCharacter(current->outh, ' ', current->cols - current->x, pos, &n);
 }
 
 static void setCursorPos(struct current *current, int x)
 {
-    COORD pos = { (SHORT)x, (SHORT)current->y };
+    COORD pos;
+
+    pos.X = (SHORT)x;
+    pos.Y = (SHORT) current->y;
 
     SetConsoleCursorPosition(current->outh, pos);
     current->x = x;
