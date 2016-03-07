@@ -195,6 +195,12 @@ void linenoiseHistoryFree(void) {
     }
 }
 
+static int list_all_completions = 0;  /* TAB lists all completions once instead of */
+                                      /* rotating them on the same line */
+void linenoiseSetListAll(int listAllMaybe){
+    list_all_completions = listAllMaybe;
+}
+
 #if defined(USE_TERMIOS)
 static void linenoiseAtExit(void);
 static struct termios orig_termios; /* in order to restore at exit */
@@ -1071,6 +1077,17 @@ static void freeCompletions(linenoiseCompletions *lc) {
     free(lc->cvec);
 }
 
+/* List all completion alternatives. One item per line.*/
+static void listAllCompletions(linenoiseCompletions *lc) {
+    size_t i = 0;
+
+    printf("\r\n");
+    while(i < lc->len) {
+        printf("%s\r\n", lc->cvec[i]);
+        ++i;
+    }
+}
+
 static int completeLine(struct current *current) {
     linenoiseCompletions lc = { 0, NULL };
     int c = 0;
@@ -1080,6 +1097,12 @@ static int completeLine(struct current *current) {
         beep();
     } else {
         size_t stop = 0, i = 0;
+
+        if(list_all_completions && lc.len>1) {
+	        listAllCompletions(&lc);
+	        refreshLine(current->prompt, current);
+	        stop=1;
+        }
 
         while(!stop) {
             /* Show completion or original buffer */
@@ -1100,6 +1123,12 @@ static int completeLine(struct current *current) {
 
             switch(c) {
                 case '\t': /* tab */
+                    if(list_all_completions){   /* There is only one completion result. Accept it and continue */
+		        if (i < lc.len) {
+                            set_current(current,lc.cvec[i]);
+                        }
+                        return 0;
+                    }
                     i = (i+1) % (lc.len+1);
                     if (i == lc.len) beep();
                     break;

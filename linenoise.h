@@ -62,6 +62,12 @@ void linenoiseAddCompletion(linenoiseCompletions *, const char *);
 #endif
 
 /*
+ * Whether TAB cycles the possible completions in sequence (0, default)
+ * or shows them all at once (1)
+ */
+void linenoiseSetListAll(int listAllMaybe);
+
+/*
  * Prompts for input using the given string as the input
  * prompt. Returns when the user has tapped ENTER or (on an empty
  * line) EOF (Ctrl-D on Unix, Ctrl-Z on Windows). Returns either

@@ -9,6 +9,14 @@ void completion(const char *buf, linenoiseCompletions *lc) {
         linenoiseAddCompletion(lc,"hello");
         linenoiseAddCompletion(lc,"hello there");
     }
+    if (buf[0] == 'e') {
+        linenoiseAddCompletion(lc,"example here");
+        linenoiseAddCompletion(lc,"example there");
+        linenoiseAddCompletion(lc,"example everywhere");
+    }
+    if (buf[0] == 'c') {
+        linenoiseAddCompletion(lc,"cello");
+    }
 }
 #endif
 
