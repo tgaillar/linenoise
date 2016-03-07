@@ -1286,7 +1286,7 @@ process_char:
                         c = check_special(current->fd);
                     }
 #endif
-                    if (c == ctrl('P') || c == SPECIAL_UP) {
+                    if (c == ctrl('P') || c == SPECIAL_UP || c == ctrl('R')) {
                         /* Search for the previous (earlier) match */
                         if (searchpos > 0) {
                             searchpos--;
