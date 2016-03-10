@@ -195,6 +195,8 @@ void linenoiseHistoryFree(void) {
     }
 }
 
+char *linenoise_buffer = NULL;
+
 static int list_all_completions = 0;  /* TAB lists all completions once instead of */
                                       /* rotating them on the same line */
 void linenoiseSetListAll(int listAllMaybe){
@@ -1078,32 +1080,129 @@ static void freeCompletions(linenoiseCompletions *lc) {
 }
 
 /* List all completion alternatives. One item per line.*/
-static void listAllCompletions(linenoiseCompletions *lc) {
-    size_t i = 0;
+static void listAllCompletions(linenoiseCompletions *lc, struct current *current) {
+    size_t i;
 
+#ifdef DEBUG
+    printf ("\r");
+#endif
+#if 0
     printf("\r\n");
-    while(i < lc->len) {
-        printf("%s\r\n", lc->cvec[i]);
-        ++i;
+    for (i = 0; i < lc->len; i++) {
+      printf("%s\r\n", lc->cvec[i]);
     }
+#else
+    // First evaluate the longest completion
+    unsigned int lenmax = 0;
+    for (i = 0; i < lc->len; i++) {
+      unsigned int l = strlen (lc->cvec[i]);
+      if (lenmax < l) {
+	lenmax = l;
+      }
+    }
+
+    // Then compute the number of items per line (with 2 spaces separation)
+    unsigned int ipl = (current->cols + 2) / (lenmax + 2);
+
+    // And the number of items per row
+    unsigned int ipr = (lc->len + ipl - 1) / ipl;
+
+    // Now compute the format string (upto 999 items per line, a true max
+    char ifs[strlen ("%s-%s") + 3 + 1];
+    sprintf (ifs, "%%s%%-%ds", lenmax);
+
+    // And finally output all items
+    unsigned int r, c;
+    for (r = 0; r < ipr; r++) {
+      for (i = 0; i < ipl; i++) {
+	c = i*ipr + r;
+	if (c < lc->len) {
+	  printf (ifs, (i ? "  " : ""), lc->cvec[c]);
+	}
+      }
+      printf ("\r\n");
+    }
+#endif
 }
 
 static int completeLine(struct current *current) {
-    linenoiseCompletions lc = { 0, NULL };
     int c = 0;
 
-    completionCallback(current->buf,&lc);
+    // Compute the boundaries of the word to be completed
+    int end   = current->pos;
+    int start = (end > 0) ? end - 1 : end;
+    {
+      int i = end;
+      while (i >= 0) {
+	if (current->buf[i] != ' ') {
+	  start = i;
+	  i--;
+	} else {
+	  break;
+	}
+      }
+    }
+
+    // Create a copy of the word
+    unsigned int n = end - start;
+    char word[n + 1];
+    strncpy (word, current->buf + start, n);
+    word[n] = 0;
+
+    // Make line buffer available and call completion callback with parameters
+    linenoiseCompletions lc = { 0, NULL };
+    linenoise_buffer = current->buf;
+    completionCallback(word, start, end, &lc);
+
     if (lc.len == 0) {
         beep();
     } else {
-        size_t stop = 0, i = 0;
 
-        if(list_all_completions && lc.len>1) {
-	        listAllCompletions(&lc);
+      if(list_all_completions) {
+        // First completion item anyway
+        unsigned int comlen = strlen (lc.cvec[0]);
+        char comstr[comlen + 1];
+        strncpy (comstr, lc.cvec[0], comlen);
+	comstr[comlen] = 0;
+
+        // Try to find a common set in all completions
+        if(lc.len>1) {
+	  unsigned int k, j;
+	  for (k = 1; k < lc.len; k++) {
+	    for (j = 0; comstr[j] && (j < comlen); j++) {
+	      if (comstr[j] != lc.cvec[k][j]) {
+		comlen = j;
+		comstr[comlen] = 0;
+		break;
+	      }
+	    }
+	  }
+
+	  // If none found or common part matches current word, show them all and stop here
+	  if(!comstr[0] || (comlen == (end - start))) {
+	    listAllCompletions(&lc, current);
 	        refreshLine(current->prompt, current);
-	        stop=1;
-        }
+		freeCompletions(&lc);
+                return 0;
+	  }
+	}
 
+	// Otherwise complete word up to common part and stop here
+	insert_chars (current, current->pos, comstr + n);
+	if (lc.len == 1) {
+	  if (current->buf[current->pos] != ' ') {
+	    insert_char (current, current->pos, ' ');
+	  } else {
+	    current->pos++;
+	  }
+      }
+	refreshLine(current->prompt, current);
+	freeCompletions(&lc);
+	return 0;
+      }
+
+	size_t stop = 0;
+	size_t i = 0;
         while(!stop) {
             /* Show completion or original buffer */
             if (i < lc.len) {
@@ -1127,6 +1226,7 @@ static int completeLine(struct current *current) {
 		        if (i < lc.len) {
                             set_current(current,lc.cvec[i]);
                         }
+			freeCompletions(&lc);
                         return 0;
                     }
                     i = (i+1) % (lc.len+1);
@@ -1164,8 +1264,34 @@ linenoiseCompletionCallback * linenoiseSetCompletionCallback(linenoiseCompletion
 }
 
 void linenoiseAddCompletion(linenoiseCompletions *lc, const char *str) {
-    lc->cvec = (char **)realloc(lc->cvec,sizeof(char*)*(lc->len+1));
-    lc->cvec[lc->len++] = strdup(str);
+
+  // Reallocate the vector with one more slot
+  lc->cvec = (char **)realloc(lc->cvec,sizeof(char*)*(lc->len+1));
+
+  // Walk the vector until we find the proper slot, save slot and replace with given string
+  char *cvec = NULL;
+  unsigned int i;
+  for (i = 0; i < lc->len; i++) {
+    if (strcasecmp (str, lc->cvec[i]) <= 0) {
+      cvec = lc->cvec[i];
+      lc->cvec[i] = strdup (str);
+      i++;
+      break;
+    }
+  }
+
+  // If no hit yet, then next slot is the given string
+  if (!cvec) {
+    cvec = strdup (str);
+  }
+
+  // Increment the vector length and complete the shift (possibly starting with the given string
+  lc->len++;
+  for (; i < lc->len; i++) {
+    char *tmp = lc->cvec[i];
+    lc->cvec[i] = cvec;
+    cvec = tmp;
+  }
 }
 
 #endif
@@ -1188,8 +1314,11 @@ static int linenoiseEdit(struct current *current) {
         /* Only autocomplete when the callback is set. It returns < 0 when
          * there was an error reading from fd. Otherwise it will return the
          * character that should be handled next. */
-        if (c == '\t' && current->pos == current->chars && completionCallback != NULL) {
+        if (c == '\t' && (list_all_completions || current->pos == current->chars) && completionCallback != NULL) {
             c = completeLine(current);
+#ifdef DEBUG
+	    refreshLine(current->prompt, current);
+#endif
             /* Return on errors */
             if (c < 0) return current->len;
             /* Read next character when 0 */
