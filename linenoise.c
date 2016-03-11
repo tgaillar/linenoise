@@ -1123,7 +1123,6 @@ static void listAllCompletions(linenoiseCompletions *lc, struct current *current
       printf ("\r\n");
     }
     fflush (stdout);
-#endif
 }
 
 static int completeLine(struct current *current) {
@@ -1180,7 +1179,7 @@ static int completeLine(struct current *current) {
 	  }
 
 	  // If none found or common part matches current word, show them all and stop here
-	  if(!comstr[0] || (comlen == (end - start))) {
+	  if(!comstr[0] || (comlen == (unsigned int) (end - start))) {
 	    listAllCompletions(&lc, current);
 	        refreshLine(current->prompt, current);
 		freeCompletions(&lc);
