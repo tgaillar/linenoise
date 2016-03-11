@@ -1,10 +1,12 @@
 # Linenoise
 
-A minimal, zero-config, BSD licensed, readline replacement.
+A minimal, zero-config, BSD licensed, readline-like replacement initiated by antirez (antirez at gmail) and forked/improved by many others.
 
-News: linenoise now includes minimal completion support, thanks to Pieter Noordhuis (@pnoordhuis).
+## Features
 
-News: linenoise is now part of [Android](http://android.git.kernel.org/?p=platform/system/core.git;a=tree;f=liblinenoise;h=56450eaed7f783760e5e6a5993ef75cde2e29dea;hb=HEAD Android)!
+ * Inline editing, with arrow and (some) emacs-like control sequence support
+ * Auto(magic) completion in latest DOS-like mode (default) or readline-like mode
+ * History loading/saving
 
 ## Can a line editing library be 20k lines of code?
 
@@ -17,15 +19,15 @@ So what usually happens is either:
  
 The result is a pollution of binaries without line editing support.
 
-So I spent more or less two hours doing a reality check resulting in this little library: is it *really* needed for a line editing library to be 20k lines of code? Apparently not, it is possibe to get a very small, zero configuration, trivial to embed library, that solves the problem. Smaller programs will just include this, supporing line editing out of the box. Larger programs may use this little library or just checking with configure if readline/libedit is available and resorting to linenoise if not.
+So I (antirez) spent more or less two hours doing a reality check resulting in this little library: is it *really* needed for a line editing library to be 20k lines of code? Apparently not, it is possibe to get a very small, zero configuration, trivial to embed library, that solves the problem. Smaller programs will just include this, supporting line editing out of the box. Larger programs may use this little library or just checking with configure if readline/libedit is available and resorting to linenoise if not.
 
 ## Terminals, in 2010.
 
-Apparently almost every terminal you can happen to use today has some kind of support for VT100 alike escape sequences. So I tried to write a lib using just very basic VT100 features. The resulting library appears to work everywhere I tried to use it.
+Apparently almost every terminal one happens to use today has some kind of support for VT100 alike escape sequences. So I (antirez) tried to write a lib using just very basic VT100 features. The resulting library appears to work everywhere I (antirez) tried to use it.
 
-Since it's so young I guess there are a few bugs, or the lib may not compile or work with some operating system, but it's a matter of a few weeks and eventually we'll get it right, and there will be no excuses for not shipping command line tools without built-in line editing support.
+It is still young code with (possibly) remaining bugs and/or compilation/OS issues, but it's a matter of a time before it gets right. So there will be no excuses for shipping command line tools without built-in line editing support.
 
-The library is currently less than 2000 lines of code. In order to use it in your project just look at the *example.c* file in the source distribution, it is trivial. Linenoise is BSD code, so you can use both in free software and commercial software.
+The library is currently less than 2000 lines of code. In order to use it in a project, just look at the *example.c* file in the source distribution, it is trivial. Linenoise is BSD code, so it can be used both in free software and commercial software.
 
 ## Tested with...
 
@@ -37,11 +39,11 @@ The library is currently less than 2000 lines of code. In order to use it in you
  * OpenBSD 4.5 through an OSX Terminal.app ($TERM = screen)
  * IBM AIX 6.1
  * FreeBSD xterm ($TERM = xterm)
+ * Windows (console mode, not --yet-- working in an xterm-aware terminal front)
 
 Please test it everywhere you can and report back!
 
 ## Let's push this forward!
 
-Please fork it and add something interesting and send me a pull request. What's especially interesting are fixes, new key bindings, completion.
+Please fork it, add something interesting and send a pull request. What's especially interesting are fixes, new key bindings, completion.
 
-Send feedbacks to antirez at gmail

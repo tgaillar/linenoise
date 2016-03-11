@@ -33,11 +33,12 @@ void completion(const char *text, int start, int end, linenoiseCompletions *lc) 
     }
 }
 
-static char  *cmd_arg0[]     = { "hello", "example", "cello", NULL };
+static char  *cmd_arg0[]     = { "hello", "example", "cello", "count", NULL };
 static char  *hello_arg1[]   = { "there", NULL };
 static char  *example_arg1[] = { "here", "there", "everywhere", NULL };
 static char  *cello_arg1[]   = { NULL };
-static char **cmd_arg1[]     = { hello_arg1, example_arg1, cello_arg1, NULL };
+static char  *count_arg1[]   = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "heighteen", "nineteen", "twenty", NULL };
+static char **cmd_arg1[]     = { hello_arg1, example_arg1, cello_arg1, count_arg1, NULL };
 
 void
 completion_rl (const char *text, int start, int end, linenoiseCompletions *lc) {

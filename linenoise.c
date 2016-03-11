@@ -3,7 +3,8 @@
  *
  * You can find the latest source code at:
  *
- *   http://github.com/msteveb/linenoise
+ *   http://github.com/tgaillar/linenoise
+ *   (forked from http://github.com/msteveb/linenoise)
  *   (forked from http://github.com/antirez/linenoise)
  *
  * Does a number of crazy assumptions that happen to be true in 99.9999% of
@@ -14,6 +15,7 @@
  * Copyright (c) 2010, Salvatore Sanfilippo <antirez at gmail dot com>
  * Copyright (c) 2010, Pieter Noordhuis <pcnoordhuis at gmail dot com>
  * Copyright (c) 2011, Steve Bennett <steveb at workware dot net dot au>
+ * Copyright (c) 2016, Thibaud Gaillard <thibaud dot gaillard at gmail dot com>
  *
  * All rights reserved.
  *
@@ -46,9 +48,11 @@
  * - http://invisible-island.net/xterm/ctlseqs/ctlseqs.html
  * - http://www.3waylabs.com/nw/WWW/products/wizcon/vt220.html
  *
- * Bloat:
- * - Completion?
- *
+ * Features:
+ * - inline editing, with arrow and (some) emacs-like control sequence support
+ * - auto(magic) completion in latest DOS-like mode (default) or readline-like mode
+ * - history loading/saving
+ * 
  * Unix/termios
  * ------------
  * List of escape sequences used by this program, we do everything just
@@ -1086,32 +1090,28 @@ static void listAllCompletions(linenoiseCompletions *lc, struct current *current
 #ifdef DEBUG
     printf ("\r");
 #endif
-#if 0
     printf("\r\n");
-    for (i = 0; i < lc->len; i++) {
-      printf("%s\r\n", lc->cvec[i]);
-    }
-#else
+
     // First evaluate the longest completion
-    unsigned int lenmax = 0;
+    unsigned int lmax = 0;
     for (i = 0; i < lc->len; i++) {
       unsigned int l = strlen (lc->cvec[i]);
-      if (lenmax < l) {
-	lenmax = l;
+      if (lmax < l) {
+	lmax = l;
       }
     }
 
     // Then compute the number of items per line (with 2 spaces separation)
-    unsigned int ipl = (current->cols + 2) / (lenmax + 2);
+    unsigned int ipl = (current->cols + 2) / (lmax + 2);
 
     // And the number of items per row
     unsigned int ipr = (lc->len + ipl - 1) / ipl;
 
-    // Now compute the format string (upto 999 items per line, a true max
+    // Now compute the format string (upto 999 items per line, a real max)
     char ifs[strlen ("%s-%s") + 3 + 1];
-    sprintf (ifs, "%%s%%-%ds", lenmax);
+    sprintf (ifs, "%%s%%-%ds", lmax);
 
-    // And finally output all items
+    // And finally show all items in vertical colums
     unsigned int r, c;
     for (r = 0; r < ipr; r++) {
       for (i = 0; i < ipl; i++) {
@@ -1122,6 +1122,7 @@ static void listAllCompletions(linenoiseCompletions *lc, struct current *current
       }
       printf ("\r\n");
     }
+    fflush (stdout);
 #endif
 }
 
