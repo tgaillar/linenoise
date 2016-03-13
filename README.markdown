@@ -5,7 +5,7 @@ A minimal, zero-config, BSD licensed, readline-like replacement initiated by ant
 ## Features
 
  * Inline editing, with arrow and (some) emacs-like control sequence support
- * Auto(magic) completion in latest DOS-like mode (default) or readline-like mode
+ * Auto(magic) completion in latest DOS-like mode (default) or readline-like mode with column sorted output and optional filtering
  * History loading/saving
 
 ## Can a line editing library be 20k lines of code?

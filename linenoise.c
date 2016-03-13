@@ -199,14 +199,6 @@ void linenoiseHistoryFree(void) {
     }
 }
 
-char *linenoise_buffer = NULL;
-
-static int list_all_completions = 0;  /* TAB lists all completions once instead of */
-                                      /* rotating them on the same line */
-void linenoiseSetListAll(int listAllMaybe){
-    list_all_completions = listAllMaybe;
-}
-
 #if defined(USE_TERMIOS)
 static void linenoiseAtExit(void);
 static struct termios orig_termios; /* in order to restore at exit */
@@ -1067,7 +1059,37 @@ static int insert_chars(struct current *current, int pos, const char *chars)
 }
 
 #ifndef NO_COMPLETION
-static linenoiseCompletionCallback *completionCallback = NULL;
+
+char *linenoise_buffer                 = NULL;
+char  linenoise_completion_append_char = ' ';
+
+static int list_all_completions = 0;  /* TAB lists all completions once instead of */
+                                      /* rotating them on the same line */
+
+static linenoiseCompletionCallback       *completionCallback       = NULL;
+static linenoiseCompletionFilterCallback *completionFilterCallback = NULL;
+
+void linenoiseSetListAll (int listAllMaybe) {
+  list_all_completions = listAllMaybe;
+}
+
+/* Register a callback function to be called for tab-completion.
+   Returns the prior callback so that the caller may (if needed) restore it when done.
+*/
+linenoiseCompletionCallback *linenoiseSetCompletionCallback (linenoiseCompletionCallback *function) {
+  linenoiseCompletionCallback *old = completionCallback;
+  completionCallback = function;
+  return old;
+}
+
+/* Register a callback function to be called for filtering tab-completion results.
+   Returns the prior callback so that the caller may (if needed) restore it when done.
+*/
+linenoiseCompletionFilterCallback *linenoiseSetCompletionFilterCallback (linenoiseCompletionFilterCallback *function) {
+  linenoiseCompletionFilterCallback *old = completionFilterCallback;
+  completionFilterCallback = function;
+  return old;
+}
 
 static void beep() {
 #ifdef USE_TERMIOS
@@ -1076,197 +1098,207 @@ static void beep() {
 #endif
 }
 
-static void freeCompletions(linenoiseCompletions *lc) {
-    size_t i;
-    for (i = 0; i < lc->len; i++)
-        free(lc->cvec[i]);
-    free(lc->cvec);
+static void freeCompletions (linenoiseCompletions *lc) {
+  size_t i;
+  for (i = 0; i < lc->len; i++)
+    free (lc->cvec[i]);
+  free (lc->cvec);
 }
 
 /* List all completion alternatives. One item per line.*/
-static void listAllCompletions(linenoiseCompletions *lc, struct current *current) {
-    size_t i;
+static void listAllCompletions (linenoiseCompletions *lc, struct current *current) {
+  size_t i;
 
-#ifdef DEBUG
-    printf ("\r");
-#endif
-    printf("\r\n");
+  // Return if no completion at all
+  if (!lc || !lc->len) {
+    return;
+  }
 
-    // First evaluate the longest completion
-    unsigned int lmax = 0;
-    for (i = 0; i < lc->len; i++) {
-      unsigned int l = strlen (lc->cvec[i]);
-      if (lmax < l) {
-	lmax = l;
-      }
+  // Re-evaluate screen width and make sure we start from leftmost column (debug)
+  getWindowSize (current);
+  printf ("\n\r");
+
+  // First evaluate the longest completion, possibly filtering completions
+  char *cvec[lc->len];
+  unsigned int lmax = 0;
+  for (i = 0; i < lc->len; i++) {
+    cvec[i] = completionFilterCallback ? completionFilterCallback (lc->cvec[i]) : NULL;
+    unsigned int l = strlen (cvec[i] ? cvec[i] : lc->cvec[i]);
+    if (lmax < l) {
+      lmax = l;
     }
+  }
 
-    // Then compute the number of items per line (with 2 spaces separation)
-    unsigned int ipl = (current->cols + 2) / (lmax + 2);
+  // Then compute the number of items per row (with 2 spaces separation)
+  unsigned int ipr = (current->cols + 2) / (lmax + 2);
 
-    // And the number of items per row
-    unsigned int ipr = (lc->len + ipl - 1) / ipl;
+  // And the number of items per column
+  unsigned int ipc = (lc->len + ipr - 1) / ipr;
 
-    // Now compute the format string (upto 999 items per line, a real max)
-    char ifs[strlen ("%s-%s") + 3 + 1];
-    sprintf (ifs, "%%s%%-%ds", lmax);
+  // Now compute the format string (upto 999 items per line, a real max)
+  char ifs[strlen ("%s-%s") + 3 + 1];
+  sprintf (ifs, "%%s%%-%ds", lmax);
 
-    // And finally show all items in vertical colums
-    unsigned int r, c;
-    for (r = 0; r < ipr; r++) {
-      for (i = 0; i < ipl; i++) {
-	c = i*ipr + r;
-	if (c < lc->len) {
-	  printf (ifs, (i ? "  " : ""), lc->cvec[c]);
+  // And finally show all items in vertical colums (possibly freeing filtered result)
+  unsigned int r, c;
+  for (r = 0; r < ipc; r++) {
+    for (c = 0; c < ipr; c++) {
+      i = c*ipc + r;
+      if (i < lc->len) {
+	printf (ifs, (c ? "  " : ""), (cvec[i] ? cvec[i] : lc->cvec[i]));
+	if (cvec[i]) {
+	  free (cvec[i]);
 	}
       }
-      printf ("\r\n");
     }
-    fflush (stdout);
+    printf ("\r\n");
+  }
+  fflush (stdout);
 }
 
-static int completeLine(struct current *current) {
-    int c = 0;
+static int completeLine (struct current *current) {
+  int c = 0;
 
-    // Compute the boundaries of the word to be completed
-    int end   = current->pos;
-    int start = (end > 0) ? end - 1 : end;
-    {
-      int i = end;
-      while (i >= 0) {
-	if (current->buf[i] != ' ') {
-	  start = i;
-	  i--;
-	} else {
-	  break;
-	}
-      }
+  // Single completion will insert this char afterwards (unless null)
+  linenoise_completion_append_char = ' ';
+
+  // Compute the boundaries of the word to be completed
+  unsigned int end   = current->pos;
+  unsigned int start = end;
+  {
+    int i = end - 1;
+    while ((i >= 0) && (current->buf[i] != ' ')) {
+      start = i;
+      i--;
     }
+  }
 
-    // Create a copy of the word
-    unsigned int n = end - start;
-    char word[n + 1];
-    strncpy (word, current->buf + start, n);
-    word[n] = 0;
+  // Create a copy of the word
+  unsigned int n = end - start;
+  char word[n + 1];
+  strncpy (word, current->buf + start, n);
+  word[n] = 0;
 
-    // Make line buffer available and call completion callback with parameters
-    linenoiseCompletions lc = { 0, NULL };
-    linenoise_buffer = current->buf;
-    completionCallback(word, start, end, &lc);
+  // Make line buffer available and call completion callback with parameters
+  linenoiseCompletions lc = { 0, NULL };
+  linenoise_buffer = current->buf;
+  completionCallback (word, start, end, &lc);
 
-    if (lc.len == 0) {
-        beep();
-    } else {
+  if (lc.len == 0) {
+    beep ();
+  } else {
 
-      if(list_all_completions) {
-        // First completion item anyway
-        unsigned int comlen = strlen (lc.cvec[0]);
-        char comstr[comlen + 1];
-        strncpy (comstr, lc.cvec[0], comlen);
-	comstr[comlen] = 0;
+    // Readline-like (minimalistic mode)
+    if (list_all_completions) {
+      // First completion item anyway
+      unsigned int comlen = strlen (lc.cvec[0]);
+      char comstr[comlen + 1];
+      strncpy (comstr, lc.cvec[0], comlen);
+      comstr[comlen] = 0;
 
-        // Try to find a common set in all completions
-        if(lc.len>1) {
-	  unsigned int k, j;
-	  for (k = 1; k < lc.len; k++) {
-	    for (j = 0; comstr[j] && (j < comlen); j++) {
-	      if (comstr[j] != lc.cvec[k][j]) {
-		comlen = j;
-		comstr[comlen] = 0;
-		break;
-	      }
+      // Try to find a common set in all completions
+      if (lc.len>1) {
+	unsigned int k, j;
+	for (k = 1; k < lc.len; k++) {
+	  for (j = 0; comstr[j] && (j < comlen); j++) {
+	    if (comstr[j] != lc.cvec[k][j]) {
+	      comlen = j;
+	      comstr[comlen] = 0;
+	      break;
 	    }
 	  }
-
-	  // If none found or common part matches current word, show them all and stop here
-	  if(!comstr[0] || (comlen == (unsigned int) (end - start))) {
-	    listAllCompletions(&lc, current);
-	        refreshLine(current->prompt, current);
-		freeCompletions(&lc);
-                return 0;
-	  }
 	}
 
-	// Otherwise complete word up to common part and stop here
-	insert_chars (current, current->pos, comstr + n);
-	if (lc.len == 1) {
-	  if (current->buf[current->pos] != ' ') {
-	    insert_char (current, current->pos, ' ');
+	// Show all completions anyway...
+	listAllCompletions (&lc, current);
+
+	// ... but beep if no common part or common part already matches current word
+	if (!comstr[0] || (comlen == (unsigned int) (end - start))) {
+	  beep ();
+	}
+      }
+
+      // Otherwise complete word up to common part and stop here
+      insert_chars (current, current->pos, comstr + n);
+      if (lc.len == 1) {
+	if (linenoise_completion_append_char) {
+	  if (current->buf[current->pos] != linenoise_completion_append_char) {
+	    insert_char (current, current->pos, linenoise_completion_append_char);
 	  } else {
 	    current->pos++;
 	  }
+	}
       }
-	refreshLine(current->prompt, current);
-	freeCompletions(&lc);
-	return 0;
-      }
-
-	size_t stop = 0;
-	size_t i = 0;
-        while(!stop) {
-            /* Show completion or original buffer */
-            if (i < lc.len) {
-                struct current tmp = *current;
-                tmp.buf = lc.cvec[i];
-                tmp.pos = tmp.len = strlen(tmp.buf);
-                tmp.chars = utf8_strlen(tmp.buf, tmp.len);
-                refreshLine(current->prompt, &tmp);
-            } else {
-                refreshLine(current->prompt, current);
-            }
-
-            c = fd_read(current);
-            if (c == -1) {
-                break;
-            }
-
-            switch(c) {
-                case '\t': /* tab */
-                    if(list_all_completions){   /* There is only one completion result. Accept it and continue */
-		        if (i < lc.len) {
-                            set_current(current,lc.cvec[i]);
-                        }
-			freeCompletions(&lc);
-                        return 0;
-                    }
-                    i = (i+1) % (lc.len+1);
-                    if (i == lc.len) beep();
-                    break;
-                case 27: /* escape */
-                    /* Re-show original buffer */
-                    if (i < lc.len) {
-                        refreshLine(current->prompt, current);
-                    }
-                    stop = 1;
-                    break;
-                default:
-                    /* Update buffer and return */
-                    if (i < lc.len) {
-                        set_current(current,lc.cvec[i]);
-                    }
-                    stop = 1;
-                    break;
-            }
-        }
+      refreshLine (current->prompt, current);
+      freeCompletions (&lc);
+      return 0;
     }
 
-    freeCompletions(&lc);
-    return c; /* Return last read character */
-}
+    // Original DOS-like completion mode
+    size_t stop = 0;
+    size_t i = 0;
+    while (!stop) {
 
-/* Register a callback function to be called for tab-completion.
-   Returns the prior callback so that the caller may (if needed)
-   restore it when done. */
-linenoiseCompletionCallback * linenoiseSetCompletionCallback(linenoiseCompletionCallback *fn) {
-    linenoiseCompletionCallback * old = completionCallback;
-    completionCallback = fn;
-    return old;
+      /* Show completion or original buffer */
+      if (i < lc.len) {
+	struct current tmp = *current;
+	tmp.buf = lc.cvec[i];
+	tmp.pos = tmp.len = strlen (tmp.buf);
+	tmp.chars = utf8_strlen (tmp.buf, tmp.len);
+	refreshLine (current->prompt, &tmp);
+      } else {
+	refreshLine (current->prompt, current);
+      }
+
+      c = fd_read (current);
+      if (c == -1) {
+	break;
+      }
+
+      switch (c) {
+
+      case '\t': /* tab */
+	if (list_all_completions){   /* There is only one completion result. Accept it and continue */
+	  if (i < lc.len) {
+	    set_current (current,lc.cvec[i]);
+	  }
+	  freeCompletions (&lc);
+	  return 0;
+	}
+	i = (i+1) % (lc.len+1);
+	if (i == lc.len) {
+	  beep ();
+	}
+	break;
+
+
+      case 27: /* escape */
+	/* Re-show original buffer */
+	if (i < lc.len) {
+	  refreshLine (current->prompt, current);
+	}
+	stop = 1;
+	break;
+
+      default:
+	/* Update buffer and return */
+	if (i < lc.len) {
+	  set_current (current,lc.cvec[i]);
+	}
+	stop = 1;
+	break;
+      }
+    }
+  }
+
+  freeCompletions (&lc);
+  return c; /* Return last read character */
 }
 
 void linenoiseAddCompletion(linenoiseCompletions *lc, const char *str) {
 
   // Reallocate the vector with one more slot
-  lc->cvec = (char **)realloc(lc->cvec,sizeof(char*)*(lc->len+1));
+  lc->cvec = (char **) realloc (lc->cvec, sizeof (char *) * (lc->len+1));
 
   // Walk the vector until we find the proper slot, save slot and replace with given string
   char *cvec = NULL;
