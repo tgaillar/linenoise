@@ -719,28 +719,60 @@ static int fd_read(struct current *current)
         if (irec.EventType == KEY_EVENT && irec.Event.KeyEvent.bKeyDown) {
             KEY_EVENT_RECORD *k = &irec.Event.KeyEvent;
             if (k->dwControlKeyState & ENHANCED_KEY) {
-                switch (k->wVirtualKeyCode) {
-                 case VK_LEFT:
-                    return SPECIAL_LEFT;
-                 case VK_RIGHT:
-                    return SPECIAL_RIGHT;
-                 case VK_UP:
-                    return SPECIAL_UP;
-                 case VK_DOWN:
-                    return SPECIAL_DOWN;
-                 case VK_INSERT:
-                    return SPECIAL_INSERT;
-                 case VK_DELETE:
-                    return SPECIAL_DELETE;
-                 case VK_HOME:
-                    return SPECIAL_HOME;
-                 case VK_END:
-                    return SPECIAL_END;
-                 case VK_PRIOR:
-                    return SPECIAL_PAGE_UP;
-                 case VK_NEXT:
-                    return SPECIAL_PAGE_DOWN;
-                }
+	      switch (k->wVirtualKeyCode) {
+	      case VK_LEFT:
+		return SPECIAL_LEFT;
+	      case VK_RIGHT:
+		return SPECIAL_RIGHT;
+	      case VK_UP:
+		return SPECIAL_UP;
+	      case VK_DOWN:
+		return SPECIAL_DOWN;
+	      case VK_INSERT:
+		return SPECIAL_INSERT;
+	      case VK_DELETE:
+		return SPECIAL_DELETE;
+	      case VK_HOME:
+		return SPECIAL_HOME;
+	      case VK_END:
+		return SPECIAL_END;
+	      case VK_PRIOR:
+		return SPECIAL_PAGE_UP;
+	      case VK_NEXT:
+		return SPECIAL_PAGE_DOWN;
+	      case VK_DIVIDE:
+		return '/';
+	      case VK_MULTIPLY:
+		return '*';
+	      case VK_SUBTRACT:
+		return '-';
+	      case VK_ADD:
+		return '+';
+	      case VK_RETURN:
+		return '\r';
+	      case VK_DECIMAL:
+		return '.';
+	      case VK_NUMPAD0:
+		return '0';
+	      case VK_NUMPAD1:
+		return '1';
+	      case VK_NUMPAD2:
+		return '2';
+	      case VK_NUMPAD3:
+		return '3';
+	      case VK_NUMPAD4:
+		return '4';
+	      case VK_NUMPAD5:
+		return '5';
+	      case VK_NUMPAD6:
+		return '6';
+	      case VK_NUMPAD7:
+		return '7';
+	      case VK_NUMPAD8:
+		return '8';
+	      case VK_NUMPAD9:
+		return '9';
+	      }
             }
             /* Note that control characters are already translated in AsciiChar */
             else if (k->wVirtualKeyCode == VK_CONTROL)
