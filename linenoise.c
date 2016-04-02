@@ -1,4 +1,4 @@
-/* linenoise.c -- VERSION 1.0
+/* linenoise.c -- VERSION 1.1
  *
  * Guerrilla line editing library against the idea that a line editing lib
  * needs to be 20,000 lines of C code.
@@ -12,8 +12,9 @@
  *
  * ------------------------------------------------------------------------
  *
- * Copyright (c) 2010-2014, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2010-2015, Salvatore Sanfilippo <antirez at gmail dot com>
  * Copyright (c) 2010-2013, Pieter Noordhuis <pcnoordhuis at gmail dot com>
+ * Copyright (c) 2016,      Thibaud Gaillard <thibaud dot gaillard at gmail dot com>
  *
  * All rights reserved.
  *
@@ -118,10 +119,18 @@
 #include <unistd.h>
 #include "linenoise.h"
 
+/*
+ * Variables provided/used by the callback completion function
+ */
+char *linenoiseCompletionBuffer;
+char  linenoiseCompletionAppendChar;
+
 #define LINENOISE_DEFAULT_HISTORY_MAX_LEN 100
 #define LINENOISE_MAX_LINE 4096
 static char *unsupported_term[] = {"dumb","cons25","emacs",NULL};
 static linenoiseCompletionCallback *completionCallback = NULL;
+static linenoiseCompletionFilterCallback *completionFilterCallback = NULL;
+static int completionListAll = 0;
 
 static struct termios orig_termios; /* In order to restore at exit.*/
 static int rawmode = 0; /* For atexit() function to check if restore is needed*/
@@ -173,6 +182,7 @@ enum KEY_ACTION{
 
 static void linenoiseAtExit(void);
 int linenoiseHistoryAdd(const char *line);
+int linenoiseEditInsert(struct linenoiseState *l, char c, char *s);
 static void refreshLine(struct linenoiseState *l);
 
 /* Debugging macro. */
@@ -340,6 +350,162 @@ static void freeCompletions(linenoiseCompletions *lc) {
         free(lc->cvec);
 }
 
+/* List all completion alternatives. One item per line. */
+static void listCompletions (linenoiseCompletions *lc, struct linenoiseState *ls) {
+    size_t i;
+
+    // Return if no completion at all
+    if (!lc || !lc->len) {
+        return;
+    }
+
+    // Re-evaluate screen width
+    ls->cols = getColumns(ls->ifd, ls->ofd);
+
+    // Make sure we start from leftmost column (debug)
+    printf ("\r\n");
+
+    // First evaluate the longest completion, possibly filtering completions
+    char *cvec[lc->len];
+    unsigned int lmax = 0;
+    for (i = 0; i < lc->len; i++) {
+        cvec[i] = completionFilterCallback ? completionFilterCallback (lc->cvec[i]) : NULL;
+	unsigned int l = strlen (cvec[i] ? cvec[i] : lc->cvec[i]);
+	if (lmax < l) {
+	  lmax = l;
+	}
+    }
+
+    // Then compute the number of items per row (with 2 spaces separation)
+    unsigned int ipr = (ls->cols + 2) / (lmax + 2);
+
+    // And the number of items per column
+    unsigned int ipc = (lc->len + ipr - 1) / ipr;
+
+    // Now compute the format string (upto 999 items per line, a real max)
+    char ifs[strlen ("%s-%s") + 3 + 1];
+    sprintf (ifs, "%%s%%-%ds", lmax);
+
+    // And finally show all items in vertical colums (possibly freeing filtered result)
+    unsigned int r, c;
+    for (r = 0; r < ipc; r++) {
+        for (c = 0; c < ipr; c++) {
+	  i = c*ipc + r;
+	  if (i < lc->len) {
+	      printf (ifs, (c ? "  " : ""), (cvec[i] ? cvec[i] : lc->cvec[i]));
+	      if (cvec[i]) {
+		 free (cvec[i]);
+	      }
+	  }
+	}
+	printf ("\r\n");
+    }
+    fflush (stdout);
+}
+
+/* Perform completion the readline way */
+static char completeLineRL(struct linenoiseState *ls, linenoiseCompletions *lc, char c, int len) {
+
+    // Default to first completion item
+    unsigned int comlen = strlen (lc->cvec[0]);
+    char comstr[comlen + 1];
+    strncpy (comstr, lc->cvec[0], comlen);
+    comstr[comlen] = 0;
+
+    // Try to find a common pattern in all completions
+    if (lc->len > 1) {
+        unsigned int i, j;
+	for (i = 1; i < lc->len; i++) {
+	    for (j = 0; comstr[j] && (j < comlen); j++) {
+	        if (comstr[j] != lc->cvec[i][j]) {
+		    comlen = j;
+		    comstr[comlen] = 0;
+		    break;
+		}
+	    }
+	}
+
+	// Show all completions anyway...
+	listCompletions (lc, ls);
+
+	// ... but beep if no common part or common part already matches current word
+	if (!comstr[0] || (comlen == (unsigned int) len)) {
+	  linenoiseBeep();
+	}
+    }
+
+    // Otherwise complete word up to common part and stop here
+    linenoiseEditInsert (ls, 0, comstr + len);
+    if (lc->len == 1) {
+	if (linenoiseCompletionAppendChar) {
+	    if (ls->buf[ls->pos] != linenoiseCompletionAppendChar) {
+	        linenoiseEditInsert (ls, linenoiseCompletionAppendChar, NULL);
+	    } else {
+	        ls->pos++;
+	    }
+	}
+    }
+
+    /* Update screen */
+    refreshLine (ls);
+
+    /* No character to return */
+    return 0;
+}
+
+/* Perform completion the (original) DOS way */
+static char completeLineDOS(struct linenoiseState *ls, linenoiseCompletions *lc, char c) {
+    size_t stop = 0, i = 0;
+    int nread, nwritten;
+
+    while(!stop) {
+
+        /* Show completion or original buffer */
+        if (i < lc->len) {
+	    struct linenoiseState saved = *ls;
+
+	    ls->len = ls->pos = strlen(lc->cvec[i]);
+	    ls->buf = lc->cvec[i];
+	    refreshLine(ls);
+	    ls->len = saved.len;
+	    ls->pos = saved.pos;
+	    ls->buf = saved.buf;
+	} else {
+	    refreshLine(ls);
+	}
+
+	/* Wait for user to decided what to do next */
+	nread = read(ls->ifd,&c,1);
+	if (nread <= 0) {
+	    return -1;
+	}
+
+	/* And proceed with typed character */
+	switch(c) {
+            case TAB: /* tab */
+	        i = (i+1) % (lc->len+1);
+		if (i == lc->len) linenoiseBeep();
+		break;
+	    case ESC: /* escape */
+	        /* Re-show original buffer */
+	        if (i < lc->len) refreshLine(ls);
+		stop = 1;
+		break;
+	    default:
+	        /* Update buffer and return */
+	      if (i < lc->len) {
+		  nwritten = snprintf(ls->buf,ls->buflen,"%s",lc->cvec[i]);
+		  ls->len = ls->pos = nwritten;
+	      }
+	      stop = 1;
+	      break;
+	}
+    }
+
+    /* Return last read character */
+    return c;
+}
+
 /* This is an helper function for linenoiseEdit() and is called when the
  * user types the <tab> key in order to complete the string currently in the
  * input.
@@ -348,65 +514,57 @@ static void freeCompletions(linenoiseCompletions *lc) {
  * structure as described in the structure definition. */
 static int completeLine(struct linenoiseState *ls) {
     linenoiseCompletions lc = { 0, NULL };
-    int nread, nwritten;
+    linenoiseCompletionBuffer = ls->buf;
+    linenoiseCompletionAppendChar = ' ';
     char c = 0;
 
-    completionCallback(ls->buf,&lc);
+    /* Compute the boundaries of the word to be completed */
+    unsigned int end   = ls->pos;
+    unsigned int start = end;
+    {
+      int i = end - 1;
+      while ((i >= 0) && (ls->buf[i] != ' ')) {
+        start = i;
+        i--;
+      }
+    }
+
+    /* Create a copy of the word to complete */
+    unsigned int n = end - start;
+    char word[n + 1];
+    strncpy (word, ls->buf + start, n);
+    word[n] = 0;
+
+    /* Call completion callback with parameters */
+    completionCallback(word, start, end, &lc);
+
+    /* Update line with completion(s), if any */
     if (lc.len == 0) {
         linenoiseBeep();
     } else {
-        size_t stop = 0, i = 0;
-
-        while(!stop) {
-            /* Show completion or original buffer */
-            if (i < lc.len) {
-                struct linenoiseState saved = *ls;
-
-                ls->len = ls->pos = strlen(lc.cvec[i]);
-                ls->buf = lc.cvec[i];
-                refreshLine(ls);
-                ls->len = saved.len;
-                ls->pos = saved.pos;
-                ls->buf = saved.buf;
-            } else {
-                refreshLine(ls);
-            }
-
-            nread = read(ls->ifd,&c,1);
-            if (nread <= 0) {
-                freeCompletions(&lc);
-                return -1;
-            }
-
-            switch(c) {
-                case 9: /* tab */
-                    i = (i+1) % (lc.len+1);
-                    if (i == lc.len) linenoiseBeep();
-                    break;
-                case 27: /* escape */
-                    /* Re-show original buffer */
-                    if (i < lc.len) refreshLine(ls);
-                    stop = 1;
-                    break;
-                default:
-                    /* Update buffer and return */
-                    if (i < lc.len) {
-                        nwritten = snprintf(ls->buf,ls->buflen,"%s",lc.cvec[i]);
-                        ls->len = ls->pos = nwritten;
-                    }
-                    stop = 1;
-                    break;
-            }
-        }
+        c = !completionListAll ? completeLineDOS (ls, &lc, c) : completeLineRL (ls, &lc, c, n);
     }
 
+    /* Cleanup */
     freeCompletions(&lc);
-    return c; /* Return last read character */
+
+    /* Return last read character */
+    return c;
 }
 
 /* Register a callback function to be called for tab-completion. */
 void linenoiseSetCompletionCallback(linenoiseCompletionCallback *fn) {
     completionCallback = fn;
+}
+
+/* Register a callback function to be called for filtering tab-completion list. */
+void linenoiseSetCompletionFilterCallback(linenoiseCompletionFilterCallback *fn) {
+    completionFilterCallback = fn;
+}
+
+/* Shall tab-completion sequence (DOS) or list (READLINE) all completions? */
+void linenoiseSetCompletionList(int mode) {
+    completionListAll = mode;
 }
 
 /* This function is used by the callback function registered by the user
@@ -590,28 +748,31 @@ static void refreshLine(struct linenoiseState *l) {
         refreshSingleLine(l);
 }
 
-/* Insert the character 'c' at cursor current position.
+/* Insert the string 's' (or the character 'c' if NULL) at cursor current position.
  *
  * On error writing to the terminal -1 is returned, otherwise 0. */
-int linenoiseEditInsert(struct linenoiseState *l, char c) {
-    if (l->len < l->buflen) {
+int linenoiseEditInsert(struct linenoiseState *l, char c, char *s) {
+    char *buf = !s ? &c : s;
+    int   len = !s ? 1  : strlen(s);
+
+    if ((l->len+len-1) < l->buflen) {
         if (l->len == l->pos) {
-            l->buf[l->pos] = c;
-            l->pos++;
-            l->len++;
+	    memcpy (l->buf+l->pos,buf,len);
+            l->pos += len;
+            l->len += len;
             l->buf[l->len] = '\0';
             if ((!mlmode && l->plen+l->len < l->cols) /* || mlmode */) {
                 /* Avoid a full update of the line in the
                  * trivial case. */
-                if (write(l->ofd,&c,1) == -1) return -1;
+                if (write(l->ofd,buf,len) == -1) return -1;
             } else {
                 refreshLine(l);
             }
         } else {
-            memmove(l->buf+l->pos+1,l->buf+l->pos,l->len-l->pos);
-            l->buf[l->pos] = c;
-            l->len++;
-            l->pos++;
+            memmove(l->buf+l->pos+len,l->buf+l->pos,l->len-l->pos);
+	    memcpy (l->buf+l->pos,buf,len);
+            l->pos += len;
+            l->len += len;
             l->buf[l->len] = '\0';
             refreshLine(l);
         }
@@ -761,7 +922,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
         /* Only autocomplete when the callback is set. It returns < 0 when
          * there was an error reading from fd. Otherwise it will return the
          * character that should be handled next. */
-        if (c == 9 && completionCallback != NULL) {
+        if (c == TAB && completionCallback != NULL) {
             c = completeLine(&l);
             /* Return on errors */
             if (c < 0) return l.len;
@@ -779,7 +940,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             errno = EAGAIN;
             return -1;
         case BACKSPACE:   /* backspace */
-        case 8:     /* ctrl-h */
+        case CTRL_H:     /* ctrl-h */
             linenoiseEditBackspace(&l);
             break;
         case CTRL_D:     /* ctrl-d, remove char at right of cursor, or if the
@@ -869,7 +1030,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             }
             break;
         default:
-            if (linenoiseEditInsert(&l,c)) return -1;
+	  if (linenoiseEditInsert(&l,c,NULL)) return -1;
             break;
         case CTRL_U: /* Ctrl+u, delete the whole line. */
             buf[0] = '\0';

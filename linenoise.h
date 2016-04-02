@@ -1,4 +1,4 @@
-/* linenoise.h -- VERSION 1.0
+/* linenoise.h -- VERSION 1.1
  *
  * Guerrilla line editing library against the idea that a line editing lib
  * needs to be 20,000 lines of C code.
@@ -9,6 +9,7 @@
  *
  * Copyright (c) 2010-2014, Salvatore Sanfilippo <antirez at gmail dot com>
  * Copyright (c) 2010-2013, Pieter Noordhuis <pcnoordhuis at gmail dot com>
+ * Copyright (c) 2016,      Thibaud Gaillard <thibaud dot gaillard at gmail dot com>
  *
  * All rights reserved.
  *
@@ -43,20 +44,47 @@
 extern "C" {
 #endif
 
+/*
+ * Completion list structure
+ */
 typedef struct linenoiseCompletions {
   size_t len;
   char **cvec;
 } linenoiseCompletions;
 
-typedef void(linenoiseCompletionCallback)(const char *, linenoiseCompletions *);
-void linenoiseSetCompletionCallback(linenoiseCompletionCallback *);
-void linenoiseAddCompletion(linenoiseCompletions *, const char *);
+typedef void  (linenoiseCompletionCallback)       (const char *text, int start, int end, linenoiseCompletions *lc);
+typedef char *(linenoiseCompletionFilterCallback) (const char *text);
 
+/*
+ * Variables provided/used by the callback completion function
+ */
+extern char *linenoiseCompletionBuffer;
+extern char  linenoiseCompletionAppendChar;
+
+/*
+ * Functions to set/control the callback completion function
+ */
+void linenoiseSetCompletionCallback(linenoiseCompletionCallback *compfn);
+void linenoiseSetCompletionFilterCallback(linenoiseCompletionFilterCallback *filterfn);
+void linenoiseSetCompletionList(int mode);
+void linenoiseAddCompletion(linenoiseCompletions *lc, const char *comp);
+
+/*
+ * Main function
+ */
 char *linenoise(const char *prompt);
+
+/*
+ * History functions
+ */
 int linenoiseHistoryAdd(const char *line);
 int linenoiseHistorySetMaxLen(int len);
 int linenoiseHistorySave(const char *filename);
 int linenoiseHistoryLoad(const char *filename);
+
+/*
+ * Utility functions
+ */
 void linenoiseClearScreen(void);
 void linenoiseSetMultiLine(int ml);
 void linenoisePrintKeyCodes(void);

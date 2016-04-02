@@ -1,12 +1,13 @@
 # Linenoise
 
-A minimal, zero-config, BSD licensed, readline replacement used in Redis,
-MongoDB, and Android.
+A minimal, zero-config, BSD licensed, readline-like replacement used in Redis, MongoDB, and Android. It was initiated by antirez (antirez at gmail) and forked/improved.
+
+## Features
 
 * Single and multi line editing mode with the usual key bindings implemented.
 * History handling.
-* Completion.
-* About 1,100 lines of BSD license source code.
+* Completion in DOS mode or READLINE mode (with optional filtering).
+* About 1,250 lines of BSD license source code.
 * Only uses a subset of VT100 escapes (ANSI.SYS compatible).
 
 ## Can a line editing library be 20k lines of code?
@@ -20,12 +21,11 @@ So what usually happens is either:
  
 The result is a pollution of binaries without line editing support.
 
-So I spent more or less two hours doing a reality check resulting in this little library: is it *really* needed for a line editing library to be 20k lines of code? Apparently not, it is possibe to get a very small, zero configuration, trivial to embed library, that solves the problem. Smaller programs will just include this, supporing line editing out of the box. Larger programs may use this little library or just checking with configure if readline/libedit is available and resorting to linenoise if not.
+So I (antirez) spent more or less two hours doing a reality check resulting in this little library: is it *really* needed for a line editing library to be 20k lines of code? Apparently not, it is possibe to get a very small, zero configuration, trivial to embed library, that solves the problem. Smaller programs will just include this, supporing line editing out of the box. Larger programs may use this little library or just checking with configure if readline/libedit is available and resorting to linenoise if not.
 
 ## Terminals, in 2010.
 
-Apparently almost every terminal you can happen to use today has some kind of support for basic VT100 escape sequences. So I tried to write a lib using just very basic VT100 features. The resulting library appears to work everywhere I tried to use it, and now can work even on ANSI.SYS compatible terminals, since no
-VT220 specific sequences are used anymore.
+Apparently almost every terminal you can happen to use today has some kind of support for basic VT100 escape sequences. So I (antirez) tried to write a lib using just very basic VT100 features. The resulting library appears to work everywhere I (antirez) tried to use it, and now can work even on ANSI.SYS compatible terminals, since no VT220 specific sequences are used anymore.
 
 The library is currently about 1100 lines of code. In order to use it in your project just look at the *example.c* file in the source distribution, it is trivial. Linenoise is BSD code, so you can use both in free software and commercial software.
 
@@ -47,7 +47,4 @@ Please test it everywhere you can and report back!
 
 ## Let's push this forward!
 
-Patches should be provided in the respect of linenoise sensibility for small
-easy to understand code.
-
-Send feedbacks to antirez at gmail
+Pull requests and patches should be provided in the respect of linenoise sensibility for small easy to understand code.
