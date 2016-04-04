@@ -838,6 +838,59 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
     }
 }
 
+/* Search next or previous history entry matching string typed incrementally. */
+char linenoiseEditHistorySearch(struct linenoiseState *l) {
+    char sprompt[256];
+    char sbuf[256];
+    int  slen = 0;
+    int  spos = history_len - 1;
+    struct linenoiseState ls = { l->ifd, l->ofd, &sbuf, sizeof (sbuf), &sprompt, 0, 0, 0, 0, l->cols, l->maxrows, 0 };
+
+    if (history_len > 1) {
+
+	/* Start with an empty line and loop. */
+	sbuf[slen] = 0;
+	while (1) {
+	    char c;
+	    int n;
+
+	    /* Show the search line. */
+	    ls.cols = getColumns(ls.ifd, ls.ofd);
+	    snprintf (sprompt, sizeof (sprompt), "(reverse i-search) '%s': ", sbuf);
+	    refreshLine (&ls);
+
+	    /* Read a new character and process it. */
+	    n = read (ls.ifd, &c, 1);
+//	    if (n < 0) { return 0; }
+
+	    /* Insert any "normal" character and continue. */
+	    if (n >= ' ') {
+	      if (slen +  1 < sizeof (sbuf)) {
+		sbuf[slen++] = c;
+		sbuf[slen] = 0;
+	      }
+	    }
+
+	    /* And manage other control characters. */
+	    else {
+	        switch (c) {
+		case CTRL_C:     /* ctrl-c */
+		    errno = EAGAIN;
+		    return -1;
+		case BACKSPACE:   /* backspace */
+		case CTRL_H:     /* ctrl-h */
+		    if (slen > 0) {
+		      slen--;
+		      sbuf[slen] = 0;
+		    }
+		    break;
+		}
+	    }
+	}
+	
+    }
+}
+
 /* Delete the character at the right of the cursor without altering the cursor
  * position. Basically this is what happens with the "Delete" keyboard key. */
 void linenoiseEditDelete(struct linenoiseState *l) {
