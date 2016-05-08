@@ -20,6 +20,11 @@ int main(int argc, char **argv) {
     char *line;
     char *prgname = argv[0];
 
+    // Greeting
+    printf ("Linenoise example\n");
+    printf ("(type ^D to exit)\n");
+    printf ("\n");
+
     /* Set the completion callback (defaults to DOS). This will be called every time
      * the user uses the <tab> key. */
     linenoiseSetCompletionCallback(completion);
@@ -29,7 +34,7 @@ int main(int argc, char **argv) {
         argc--;
         argv++;
 	if (!strcmp(*argv,"--readline")) {
-            printf("Readline-like mode enabled.\n");
+	  printf("Readline-like mode enabled.\n");
 	    linenoiseSetCompletionCallback(completion_rl);
 	    linenoiseSetCompletionList(1);
         } else
@@ -67,7 +72,7 @@ int main(int argc, char **argv) {
             int len = atoi(line+11);
             linenoiseHistorySetMaxLen(len);
         } else if (line[0] == '/') {
-            printf("Unreconized command: %s\n", line);
+            printf("Unrecognized command: %s\n", line);
         }
         free(line);
     }

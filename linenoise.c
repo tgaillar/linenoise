@@ -166,13 +166,17 @@ enum KEY_ACTION{
 	CTRL_D = 4,         /* Ctrl-d */
 	CTRL_E = 5,         /* Ctrl-e */
 	CTRL_F = 6,         /* Ctrl-f */
+	CTRL_G = 7,         /* Ctrl-g */
 	CTRL_H = 8,         /* Ctrl-h */
 	TAB = 9,            /* Tab */
+	NEWLINE = 10,       /* Ctrl-J */
 	CTRL_K = 11,        /* Ctrl+k */
 	CTRL_L = 12,        /* Ctrl+l */
 	ENTER = 13,         /* Enter */
 	CTRL_N = 14,        /* Ctrl-n */
 	CTRL_P = 16,        /* Ctrl-p */
+	CTRL_R = 18,        /* Ctrl-r */
+	CTRL_S = 19,        /* Ctrl-s */
 	CTRL_T = 20,        /* Ctrl-t */
 	CTRL_U = 21,        /* Ctrl+u */
 	CTRL_W = 23,        /* Ctrl+w */
@@ -260,6 +264,7 @@ fatal:
 }
 
 static void disableRawMode(int fd) {
+
     /* Don't even check the return value as it's too late. */
     if (rawmode && tcsetattr(fd,TCSAFLUSH,&orig_termios) != -1)
         rawmode = 0;
@@ -363,7 +368,7 @@ static void listCompletions (linenoiseCompletions *lc, struct linenoiseState *ls
     ls->cols = getColumns(ls->ifd, ls->ofd);
 
     // Make sure we start from leftmost column (debug)
-    printf ("\r\n");
+    write(ls->ofd, "\r\n", 2);
 
     // First evaluate the longest completion, possibly filtering completions
     char *cvec[lc->len];
@@ -392,13 +397,13 @@ static void listCompletions (linenoiseCompletions *lc, struct linenoiseState *ls
         for (c = 0; c < ipr; c++) {
 	  i = c*ipc + r;
 	  if (i < lc->len) {
-	      printf (ifs, (c ? "  " : ""), (cvec[i] ? cvec[i] : lc->cvec[i]));
+	      dprintf (ls->ofd, ifs, (c ? "  " : ""), (cvec[i] ? cvec[i] : lc->cvec[i]));
 	      if (cvec[i]) {
 		 free (cvec[i]);
 	      }
 	  }
 	}
-	printf ("\r\n");
+	write (ls->ofd, "\r\n", 2);
     }
     fflush (stdout);
 }
@@ -839,56 +844,112 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
 }
 
 /* Search next or previous history entry matching string typed incrementally. */
-char linenoiseEditHistorySearch(struct linenoiseState *l) {
-    char sprompt[256];
+int linenoiseEditHistorySearch(struct linenoiseState *l) {
     char sbuf[256];
     int  slen = 0;
-    int  spos = history_len - 1;
-    struct linenoiseState ls = { l->ifd, l->ofd, &sbuf, sizeof (sbuf), &sprompt, 0, 0, 0, 0, l->cols, l->maxrows, 0 };
+    int  spos = 0;
+    int  rcnt = 0;
+    struct linenoiseState ls = { l->ifd, l->ofd, NULL, 0, NULL, 0, 0, 0, 0, l->cols, l->maxrows, l->history_index };
 
-    if (history_len > 1) {
+    if (history_len > 0) {
 
 	/* Start with an empty line and loop. */
 	sbuf[slen] = 0;
 	while (1) {
-	    char c;
-	    int n;
+	    int newc = 0;
+	    int newr = 0;
 
 	    /* Show the search line. */
-	    ls.cols = getColumns(ls.ifd, ls.ofd);
-	    snprintf (sprompt, sizeof (sprompt), "(reverse i-search) '%s': ", sbuf);
-	    refreshLine (&ls);
-
-	    /* Read a new character and process it. */
-	    n = read (ls.ifd, &c, 1);
-//	    if (n < 0) { return 0; }
-
-	    /* Insert any "normal" character and continue. */
-	    if (n >= ' ') {
-	      if (slen +  1 < sizeof (sbuf)) {
-		sbuf[slen++] = c;
-		sbuf[slen] = 0;
-	      }
+	    {
+	          char sprompt[256];
+		  snprintf (sprompt, sizeof (sprompt), "(reverse i-search #%d) '%s': ", rcnt, sbuf);
+		  ls.prompt = sprompt;
+		  ls.plen   = strlen (sprompt);
+		  ls.cols   = getColumns(ls.ifd, ls.ofd);
+		  refreshLine (&ls);
 	    }
 
+	    /* Read a new character and process it. */
+	    char c;
+	    int n = read (ls.ifd, &c, 1);
+	    if (n < 0) { return 0; }
+
 	    /* And manage other control characters. */
-	    else {
-	        switch (c) {
-		case CTRL_C:     /* ctrl-c */
-		    errno = EAGAIN;
-		    return -1;
-		case BACKSPACE:   /* backspace */
-		case CTRL_H:     /* ctrl-h */
+	    switch (c) {
+	    case CTRL_G:     /* Cancel search */
+	        refreshLine (l);
+	        return 0;
+	    case ' '...'~':  /* Add char and initiate search, if not already */
+	        if (slen + 1 < sizeof (sbuf)) {
+		    sbuf[slen++] = c;
+		    sbuf[slen] = 0;
+		    spos = 1;
+		    newc = 1;
+		    rcnt = !rcnt ? 1 : rcnt;
+		}
+		break;
+	    case BACKSPACE:  /* Remove last char or search one last further */
+	    case CTRL_H:
+	        if (rcnt > 1) {
+		    rcnt--;
+		} else {
 		    if (slen > 0) {
-		      slen--;
-		      sbuf[slen] = 0;
+		        slen--;
+			sbuf[slen] = 0;
 		    }
-		    break;
+		    if (slen) {
+			spos = 1;
+		    } else {
+		        spos = 0;
+			rcnt = 0;
+		    }
+		}
+		break;
+	    case CTRL_R: /* Search one more further */
+		newr = 1;
+	        rcnt++;
+		break;
+	    default:
+	        strncpy (l->buf, ls.buf, ls.buflen);
+		l->len = ls.len;
+		l->pos = ls.len;
+		refreshLine (l);
+		return c;
+	    }
+
+	    /* Now search through history from earliest to oldest. */
+	    ls.buf = "";
+	    ls.buflen = 0;
+	    ls.len = 0;
+	    ls.pos = 0;
+	    ls.oldpos = 0;
+	    if (spos) {
+	        int h, m;
+		for (h = spos, m = 0; (h <= history_len) && (m < rcnt); h++) {
+		    char *hline = history[history_len - h - ls.history_index];
+		    char *match = strstr (hline, sbuf);
+		    if (match) {
+		        ls.buf    = hline;
+			ls.buflen = strlen (ls.buf);
+			ls.len    = ls.buflen;
+			ls.pos    = match - ls.buf;
+			m++;
+		    }
+		}
+
+		/* If no match found up to the requested count, adjust & possibly beep */
+		if (m != rcnt) {
+		    rcnt = !newc ? (rcnt - newr) : (m ? m : 1);
+		    if (newc) {
+		        linenoiseBeep();
+		    }
 		}
 	    }
 	}
-	
     }
+
+    /* Never reached. */
+    return 0;
 }
 
 /* Delete the character at the right of the cursor without altering the cursor
@@ -963,14 +1024,22 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
      * initially is just an empty string. */
     linenoiseHistoryAdd("");
 
+    /* Output prompt */
     if (write(l.ofd,prompt,l.plen) == -1) return -1;
+
+    /* Process typed characters */
+    int nc = 0;
     while(1) {
         char c;
         int nread;
         char seq[3];
 
-        nread = read(l.ifd,&c,1);
-        if (nread <= 0) return l.len;
+	if (nc > 0) {
+	    c = nc;
+	} else {
+	    nread = read(l.ifd,&c,1);
+	    if (nread <= 0) return l.len;
+	}
 
         /* Only autocomplete when the callback is set. It returns < 0 when
          * there was an error reading from fd. Otherwise it will return the
@@ -983,6 +1052,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             if (c == 0) continue;
         }
 
+	nc = 0;
         switch(c) {
         case ENTER:    /* enter */
             history_len--;
@@ -1027,6 +1097,9 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
         case CTRL_N:    /* ctrl-n */
             linenoiseEditHistoryNext(&l, LINENOISE_HISTORY_NEXT);
             break;
+	case CTRL_R:    /* ctrl-r */
+	    nc = linenoiseEditHistorySearch (&l);
+	    break;
         case ESC:    /* escape sequence */
             /* Read the next two bytes representing the escape sequence.
              * Use two calls to handle slow terminals returning the two

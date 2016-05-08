@@ -4,6 +4,8 @@ COFLAGS = -Os
 CDFLAGS = -g
 CWFLAGS = -Wall -W -Wno-unused-parameter
 
+all: linenoise_example
+
 linenoise_example: linenoise.h linenoise.c Makefile
 
 linenoise_example: linenoise.c example.c
