@@ -253,6 +253,11 @@ static int enableRawMode(int fd) {
      * We want read to return every single byte, without timeout. */
     raw.c_cc[VMIN] = 1; raw.c_cc[VTIME] = 0; /* 1 byte, no timer */
 
+#ifdef __CYGWIN__
+    // CYGWIN has this annoying thing it does not seem to honor the TCSAFLUSH/TCSADRAIN requirement. Grrrrr!
+    fflush (NULL); usleep (50000);
+#endif
+
     /* put terminal in raw mode after flushing */
     if (tcsetattr(fd,TCSAFLUSH,&raw) < 0) goto fatal;
     rawmode = 1;
@@ -264,6 +269,11 @@ fatal:
 }
 
 static void disableRawMode(int fd) {
+
+#ifdef __CYGWIN__
+    // CYGWIN has this annoying thing it does not seem to honor the TCSAFLUSH/TCSADRAIN requirement. Grrrrr!
+    fflush (NULL); usleep (50000);
+#endif
 
     /* Don't even check the return value as it's too late. */
     if (rawmode && tcsetattr(fd,TCSAFLUSH,&orig_termios) != -1)
