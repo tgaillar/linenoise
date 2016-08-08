@@ -270,6 +270,11 @@ completion_rl (const char *text, int start, int end, linenoiseCompletions *lc) {
 int main(int argc, char *argv[]) {
     int   comprl = 0;
 
+    // Greeting
+    printf ("Linenoise example\n");
+    printf ("(type ^D to exit)\n");
+    printf ("\n");
+
     /* Parse options, with --multiline we enable multi line editing. */
     char *prgname = argv[0];
     while(argc > 1) {
@@ -301,6 +306,7 @@ int main(int argc, char *argv[]) {
 #define USAGE_READLINE " [--readline]"
 	if (!strcmp(*argv,"--readline")) {
 	    comprl = 1;
+            printf("Readline-like mode enabled.\n");
         } else
 #endif
 	{
@@ -332,7 +338,7 @@ int main(int argc, char *argv[]) {
      * The typed string is returned as a malloc() allocated string by
      * linenoise, so the user needs to free() it. */
     char *line;
-    while((line = linenoise("hello> ")) != NULL) {
+    while((line = linenoise("linenoise> ")) != NULL) {
         /* Do something with the string. */
         if (line[0] != '\0' && line[0] != '/') {
             printf("echo: '%s'\n", line);
