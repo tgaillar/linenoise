@@ -250,8 +250,8 @@ static int enableRawMode(int fd) {
      * no signal chars (^Z,^C) */
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
     /* control chars - set return condition: min number of bytes and timer.
-     * We want read to return every single byte, without timeout. */
-    raw.c_cc[VMIN] = 1; raw.c_cc[VTIME] = 0; /* 1 byte, no timer */
+     * We want read to return every single byte, wit timeout. */
+    raw.c_cc[VMIN] = 1; raw.c_cc[VTIME] = 1; /* 1 byte, 100ms timer */
 
 #ifdef __CYGWIN__
     // CYGWIN has this annoying thing it does not seem to honor the TCSAFLUSH/TCSADRAIN requirement. Grrrrr!
@@ -266,6 +266,28 @@ static int enableRawMode(int fd) {
 fatal:
     errno = ENOTTY;
     return -1;
+}
+
+static int readMaybe(int fildes, void *buf, unsigned int nbyte) {
+    int n = read (fildes, buf, nbyte);
+
+    if ((n < 0) && ((errno == EAGAIN) || ((errno == EINTR)))) {
+        return 0;
+    }
+    return n;
+}
+
+static int readWait(int fildes, void *buf, unsigned int nbyte) {
+    int n = 0;
+
+    while (n < nbyte) {
+       int nread = readMaybe (fildes, buf+n, nbyte-n);
+       if (nread < 0) {
+	   return nread;
+       }
+       n += nread;
+    }
+    return n;
 }
 
 static void disableRawMode(int fd) {
@@ -293,7 +315,7 @@ static int getCursorPosition(int ifd, int ofd) {
 
     /* Read the response: ESC [ rows ; cols R */
     while (i < sizeof(buf)-1) {
-        if (read(ifd,buf+i,1) != 1) break;
+        if (readMaybe(ifd,buf+i,1) != 1) break;
         if (buf[i] == 'R') break;
         i++;
     }
@@ -489,8 +511,8 @@ static char completeLineDOS(struct linenoiseState *ls, linenoiseCompletions *lc,
 	    refreshLine(ls);
 	}
 
-	/* Wait for user to decided what to do next */
-	nread = read(ls->ifd,&c,1);
+	/* Wait for user to decide what to do next */
+	nread = readWait(ls->ifd,&c,1);
 	if (nread <= 0) {
 	    return -1;
 	}
@@ -881,8 +903,8 @@ int linenoiseEditHistorySearch(struct linenoiseState *l) {
 
 	    /* Read a new character and process it. */
 	    char c;
-	    int n = read (ls.ifd, &c, 1);
-	    if (n < 0) { return 0; }
+	    int n = readWait (ls.ifd, &c, 1);
+	    if (n <= 0) { return 0; }
 
 	    /* And manage other control characters. */
 	    switch (c) {
@@ -1043,12 +1065,13 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
         char c;
         int nread;
         char seq[3];
+	int eseq;
 
 	if (nc > 0) {
 	    c = nc;
 	} else {
-	    nread = read(l.ifd,&c,1);
-	    if (nread <= 0) return l.len;
+	    nread = readWait(l.ifd,&c,1);
+	    if (nread <= 0) return -1;
 	}
 
         /* Only autocomplete when the callback is set. It returns < 0 when
@@ -1110,18 +1133,26 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
 	case CTRL_R:    /* ctrl-r */
 	    nc = linenoiseEditHistorySearch (&l);
 	    break;
-        case ESC:    /* escape sequence */
-            /* Read the next two bytes representing the escape sequence.
-             * Use two calls to handle slow terminals returning the two
-             * chars at different times. */
-            if (read(l.ifd,seq,1) == -1) break;
-            if (read(l.ifd,seq+1,1) == -1) break;
+        case ESC:    /* possible escape sequence */
+            /* Try to read the next two bytes representing the escape sequence,
+	     * if any (use two calls to handle slow terminals returning the two
+             * chars at different times), otherwise end up in "manual" mode! */
+	    eseq = 0;
+            if (readMaybe(l.ifd,seq,1) != 1) {
+	        nc = ESC;
+		break;
+	    } else {
+	        eseq = ((seq[0] == '[') || (seq[0] == 'O'));
+		if (eseq && (readMaybe(l.ifd,seq+1,1) != 1)) {
+		    break;
+		}
+	    }
 
             /* ESC [ sequences. */
             if (seq[0] == '[') {
                 if (seq[1] >= '0' && seq[1] <= '9') {
                     /* Extended escape, read additional byte. */
-                    if (read(l.ifd,seq+2,1) == -1) break;
+                    if (readMaybe(l.ifd,seq+2,1) != 1) break;
                     if (seq[2] == '~') {
                         switch(seq[1]) {
                         case '3': /* Delete key. */
@@ -1165,9 +1196,6 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
                 }
             }
             break;
-        default:
-	  if (linenoiseEditInsert(&l,c,NULL)) return -1;
-            break;
         case CTRL_U: /* Ctrl+u, delete the whole line. */
             buf[0] = '\0';
             l.pos = l.len = 0;
@@ -1191,6 +1219,9 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
         case CTRL_W: /* ctrl+w, delete previous word */
             linenoiseEditDeletePrevWord(&l);
             break;
+        default:
+	    if (linenoiseEditInsert(&l,c,NULL)) return -1;
+            break;
         }
     }
     return l.len;
@@ -1210,7 +1241,7 @@ void linenoisePrintKeyCodes(void) {
         char c;
         int nread;
 
-        nread = read(STDIN_FILENO,&c,1);
+        nread = readMaybe(STDIN_FILENO,&c,1);
         if (nread <= 0) continue;
         memmove(quit,quit+1,sizeof(quit)-1); /* shift string to left. */
         quit[sizeof(quit)-1] = c; /* Insert current char on the right. */
