@@ -2,7 +2,7 @@ CC = gcc
 
 COFLAGS = -Os
 CDFLAGS = -g
-CWFLAGS = -Wall -W -Wno-unused-parameter
+CWFLAGS = -Wall -Wno-unused-parameter
 
 all: linenoise_example
 

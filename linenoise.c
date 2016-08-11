@@ -268,6 +268,7 @@ fatal:
     return -1;
 }
 
+/* Try to read n chars, possibly returning less or zero */
 static int readMaybe(int fildes, void *buf, unsigned int nbyte) {
     int n = read (fildes, buf, nbyte);
 
@@ -277,6 +278,7 @@ static int readMaybe(int fildes, void *buf, unsigned int nbyte) {
     return n;
 }
 
+/* Read exactly n chars, retrying as needed until enough */
 static int readWait(int fildes, void *buf, unsigned int nbyte) {
     int n = 0;
 
@@ -427,13 +429,13 @@ static void listCompletions (linenoiseCompletions *lc, struct linenoiseState *ls
     unsigned int r, c;
     for (r = 0; r < ipc; r++) {
         for (c = 0; c < ipr; c++) {
-	  i = c*ipc + r;
-	  if (i < lc->len) {
-	      dprintf (ls->ofd, ifs, (c ? "  " : ""), (cvec[i] ? cvec[i] : lc->cvec[i]));
-	      if (cvec[i]) {
-		 free (cvec[i]);
-	      }
-	  }
+	    i = c*ipc + r;
+	    if (i < lc->len) {
+	        dprintf (ls->ofd, ifs, (c ? "  " : ""), (cvec[i] ? cvec[i] : lc->cvec[i]));
+		if (cvec[i]) {
+		    free (cvec[i]);
+		}
+	    }
 	}
 	write (ls->ofd, "\r\n", 2);
     }
@@ -1006,7 +1008,7 @@ void linenoiseEditBackspace(struct linenoiseState *l) {
     }
 }
 
-/* Delete the previosu word, maintaining the cursor at the start of the
+/* Delete the previous word, maintaining the cursor at the start of the
  * current word. */
 void linenoiseEditDeletePrevWord(struct linenoiseState *l) {
     size_t old_pos = l->pos;
@@ -1019,6 +1021,45 @@ void linenoiseEditDeletePrevWord(struct linenoiseState *l) {
     diff = old_pos - l->pos;
     memmove(l->buf+l->pos,l->buf+old_pos,l->len-old_pos+1);
     l->len -= diff;
+    refreshLine(l);
+}
+
+/* Insert/replace previous line(s) last argument in current line/position */
+void linenoiseEditSwapPreviousLastArg(struct linenoiseState *l, unsigned int step) {
+    static size_t pstep, index, ppos, size;
+
+    /* Initialize or bail here if not enough history */
+    if (!l || (history_len < 2)) {
+        pstep = 0;
+	return;
+    }
+
+    /* Start from most recent history line unless consecutive calls where we clear previous chunk */
+    if (step != (pstep + 1)) {
+        index = 0;
+    } else {
+        size = (ppos + size < l->len) ? size : (l->len - ppos);
+	memmove(l->buf+ppos,l->buf+ppos+size,l->len-ppos-size);
+	l->len -= size;
+	l->buf[l->len] = '\0';
+	l->pos = ppos;
+
+    }
+    index += (index < (history_len - 1)) ? 1 : 0;
+
+    /* Identify previous history line's last argument */
+    size_t line = history_len - 1 - index;
+    size_t len  = strlen (history[line]);
+    size_t pos  = len;
+    while (pos && (history[line][pos-1] != ' ')) {
+        pos--;
+    }
+    size = len - pos;
+
+    /* Remember current cursor and insert identified chunk */
+    ppos = l->pos;
+    linenoiseEditInsert(l, 0, history[line]+pos);
+    pstep = step;
     refreshLine(l);
 }
 
@@ -1059,6 +1100,10 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
     /* Output prompt */
     if (write(l.ofd,prompt,l.plen) == -1) return -1;
 
+    /* ESC-. management */
+    size_t step = 0;
+    linenoiseEditSwapPreviousLastArg(NULL, step);
+
     /* Process typed characters */
     int nc = 0;
     while(1) {
@@ -1066,6 +1111,9 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
         int nread;
         char seq[3];
 	int eseq;
+
+	/* One iteration further */
+	step++;
 
 	if (nc > 0) {
 	    c = nc;
@@ -1144,12 +1192,25 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
 	    } else {
 	        eseq = ((seq[0] == '[') || (seq[0] == 'O'));
 		if (eseq && (readMaybe(l.ifd,seq+1,1) != 1)) {
+		    nc = seq[0];
 		    break;
 		}
 	    }
 
+	    /* ESC manual sequence */
+	    if (!eseq) {
+                switch(seq[0]) {
+                case '.': /* Insert previous line last argument, then cycle through previous lines */
+		    linenoiseEditSwapPreviousLastArg(&l, step);
+		    break;
+		default:
+		    nc = seq[0];
+		    break;
+                }
+	    }
+
             /* ESC [ sequences. */
-            if (seq[0] == '[') {
+            else if (seq[0] == '[') {
                 if (seq[1] >= '0' && seq[1] <= '9') {
                     /* Extended escape, read additional byte. */
                     if (readMaybe(l.ifd,seq+2,1) != 1) break;
@@ -1248,7 +1309,7 @@ void linenoisePrintKeyCodes(void) {
         if (memcmp(quit,"quit",sizeof(quit)) == 0) break;
 
         printf("'%c' %02x (%d) (type quit to exit)\n",
-            isprint(c) ? c : '?', (int)c, (int)c);
+               isprint((int)c) ? c : '?', (int)c, (int)c);
         printf("\r"); /* Go left edge manually, we are in raw mode. */
         fflush(stdout);
     }
