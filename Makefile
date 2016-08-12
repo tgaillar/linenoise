@@ -22,3 +22,6 @@ linenoise_cpp_example: linenoise.h linenoise.c
 
 clean:
 	rm -f linenoise_example linenoise_utf8_example linenoise_cpp_example *.o
+
+windows:
+	$(MAKE) CC=i686-w64-mingw32-gcc

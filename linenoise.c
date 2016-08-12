@@ -146,7 +146,11 @@
 
 /* Use -ve numbers here to co-exist with normal unicode chars */
 enum {
-    SPECIAL_NONE,
+    TAB = 9,
+    ENTER = 13,
+    ESCAPE = 27,
+    BACKSPACE = 127,
+    SPECIAL_NONE = -1,
     SPECIAL_UP = -20,
     SPECIAL_DOWN = -21,
     SPECIAL_LEFT = -22,
@@ -156,7 +160,8 @@ enum {
     SPECIAL_END = -26,
     SPECIAL_INSERT = -27,
     SPECIAL_PAGE_UP = -28,
-    SPECIAL_PAGE_DOWN = -29
+    SPECIAL_PAGE_DOWN = -29,
+    SPECIAL_META_DOT = -30
 };
 
 static int history_max_len = LINENOISE_DEFAULT_HISTORY_MAX_LEN;
@@ -561,20 +566,40 @@ static int getWindowSize(struct current *current)
  * Returns SPECIAL_NONE if unrecognised, or -1 if EOF.
  *
  * If no additional char is received within a short time,
- * 27 is returned.
+ * ESCAPE is returned.
  */
 static int check_special(int fd)
 {
-    int c = fd_read_char(fd, 50);
-    int c2;
-
-    if (c < 0) {
-        return 27;
+    /* Read next char (possibly immediate, keep reading if not) */
+    int c    = fd_read_char(fd,50);
+    int lseq = ((c == '[') || (c == 'O'));
+    while (c < 0) {
+        c = fd_read_char(fd,50);
     }
 
-    c2 = fd_read_char(fd, 50);
+    /* Analyze it and decide what to do next */
+    switch (c) {
+
+        /* Long sequence, to be continued below if immediate */
+        case '[':
+	case 'O':
+	    if (!lseq) {
+	        return c;
+	    }
+	    break;
+
+	/* Short sequence, return special key */
+        case '.':
+	    return SPECIAL_META_DOT;
+
+	/* Unknown ESC sequence, return following character */
+	default:
+	    return c;
+    }
+
+    int c2 = fd_read_char(fd, 50);
     if (c2 < 0) {
-        return c2;
+        return c;
     }
     if (c == '[' || c == 'O') {
         /* Potential arrow key */
@@ -766,7 +791,7 @@ static int fd_read(struct current *current)
 	      case VK_ADD:
 		return '+';
 	      case VK_RETURN:
-		return '\r';
+		return ENTER;
 	      case VK_DECIMAL:
 		return '.';
 	      case VK_NUMPAD0:
@@ -794,12 +819,38 @@ static int fd_read(struct current *current)
             /* Note that control characters are already translated in AsciiChar */
             else if (k->wVirtualKeyCode == VK_CONTROL)
 	        continue;
+            /* Alt/Meta key */
+            else if (k->wVirtualKeyCode == VK_MENU)
+	        continue;
             else {
 #ifdef USE_UTF8
-                return k->uChar.UnicodeChar;
+                int c = k->uChar.UnicodeChar;
 #else
-                return k->uChar.AsciiChar;
+		int c = k->uChar.AsciiChar;
 #endif
+		/* Is Meta (ALT) key down or ESC-prefixed ? */
+		int meta = (GetKeyState(VK_MENU) & 0x8000);
+		int esc  = (!meta && (c == ESCAPE));
+
+		/* Read a new char if ESC-prefixed, proceed anyway if Meta  */
+		if (meta || esc) {
+		    c = meta ? c : fd_read(current);
+		    switch (c) {
+		        case '.':
+			    return SPECIAL_META_DOT;
+		        default :
+			  if (meta) {
+			      continue;
+			  } else {
+			      return c;
+			  }
+		    }
+		}
+
+		/* Otherwise return character as is */
+		else {
+		    return c;
+		}
             }
         }
     }
@@ -1306,7 +1357,7 @@ static int completeLine (struct current *current) {
 
       switch (c) {
 
-      case '\t': /* tab */
+      case TAB: /* tab */
 	if (list_all_completions){   /* There is only one completion result. Accept it and continue */
 	  if (i < lc.len) {
 	    set_current (current,lc.cvec[i]);
@@ -1321,7 +1372,7 @@ static int completeLine (struct current *current) {
 	break;
 
 
-      case 27: /* escape */
+      case ESCAPE: /* escape */
 	/* Re-show original buffer */
 	if (i < lc.len) {
 	  refreshLine (current->prompt, current);
@@ -1387,15 +1438,22 @@ static int linenoiseEdit(struct current *current) {
     set_current(current, "");
     refreshLine(current->prompt, current);
 
+    int nc = 0;
     while(1) {
         int dir = -1;
-        int c = fd_read(current);
+        int c;
+
+	if (nc > 0) {
+	    c = nc;
+	} else {
+	  c = fd_read(current);
+	}
 
 #ifndef NO_COMPLETION
         /* Only autocomplete when the callback is set. It returns < 0 when
          * there was an error reading from fd. Otherwise it will return the
          * character that should be handled next. */
-        if (c == '\t' && (list_all_completions || current->pos == current->chars) && completionCallback != NULL) {
+        if (c == TAB && (list_all_completions || current->pos == current->chars) && completionCallback != NULL) {
             c = completeLine(current);
 #ifdef DEBUG
 	    refreshLine(current->prompt, current);
@@ -1410,19 +1468,21 @@ static int linenoiseEdit(struct current *current) {
 process_char:
         if (c == -1) return current->len;
 #ifdef USE_TERMIOS
-        if (c == 27) {   /* escape sequence */
+        if (c == ESCAPE) {   /* escape sequence */
             c = check_special(current->fd);
         }
 #endif
+
+	nc = 0;
         switch(c) {
-        case '\r':    /* enter */
+        case ENTER:    /* enter */
             history_len--;
             free(history[history_len]);
             return current->len;
         case ctrl('C'):     /* ctrl-c */
             errno = EAGAIN;
             return -1;
-        case 127:   /* backspace */
+        case BACKSPACE:   /* backspace */
         case ctrl('H'):
             if (remove_char(current, current->pos - 1) == 1) {
                 refreshLine(current->prompt, current);
@@ -1483,7 +1543,7 @@ process_char:
                     snprintf(rprompt, sizeof(rprompt), "(reverse-i-search)'%s': ", rbuf);
                     refreshLine(rprompt, current);
                     c = fd_read(current);
-                    if (c == ctrl('H') || c == 127) {
+                    if (c == ctrl('H') || c == BACKSPACE) {
                         if (rchars) {
                             int p = utf8_index(rbuf, --rchars);
                             rbuf[p] = 0;
@@ -1492,7 +1552,7 @@ process_char:
                         continue;
                     }
 #ifdef USE_TERMIOS
-                    if (c == 27) {
+                    if (c == ESCAPE) {
                         c = check_special(current->fd);
                     }
 #endif
@@ -1669,9 +1729,55 @@ history_navigation:
             current->cols = 0;
             refreshLine(current->prompt, current);
             break;
+	case SPECIAL_META_DOT: /* Meta-., insert previous line(s) last argument */
+	    {
+	        /* Bail here if not enough history, or initialize */
+	        if (history_len < 2) {
+		    break;
+		}
+	        int index = 0;
+		int size  = 0;
+		int ppos  = 0;
+
+	        while (1) {
+		    /* Proceed to next history line */
+		    index += (index < (history_len - 1)) ? 1 : 0;
+
+		    /* Clear previous insertion, if any */
+		    if (size > 0) {
+		        remove_chars(current, ppos, current->pos);
+		    }
+
+		    /* Identify previous history line's last argument */
+		    int line = history_len - 1 - index;
+		    int len  = strlen (history[line]);
+		    int pos  = len;
+		    while (pos && (history[line][pos-1] != ' ')) {
+		        pos--;
+		    }
+		    size = len - pos;
+
+		    /* Remember current cursor and insert identified chunk */
+		    ppos = current->pos;
+		    insert_chars(current, ppos, history[line]+pos);
+		    refreshLine(current->prompt, current);
+
+		    /* Repeat process if next character is Meta-. */
+		    c = fd_read(current);
+#ifdef USE_TERMIOS
+                    if (c == ESCAPE) {
+                        c = check_special(current->fd);
+                    }
+#endif
+		    if (c != SPECIAL_META_DOT) {
+		        goto process_char;
+		    }
+		}
+	    }
+	    break;
         default:
             /* Only tab is allowed without ^V */
-            if (c == '\t' || c >= ' ') {
+            if (c == TAB || c >= ' ') {
                 if (insert_char(current, current->pos, c) == 1) {
                     refreshLine(current->prompt, current);
                 }
