@@ -1961,8 +1961,8 @@ int linenoiseHistoryLoad(const char *filename) {
             }
             *dest++ = ch;
         }
-        /* Remove trailing newline */
-        if (dest != buf && (dest[-1] == '\n' || dest[-1] == '\r')) {
+        /* Remove trailing newline (LF or CR/LF or CR) */
+        while (dest != buf && (dest[-1] == '\n' || dest[-1] == '\r')) {
             dest--;
         }
         *dest = 0;
