@@ -1313,13 +1313,15 @@ static int completeLine (struct current *current) {
 	listAllCompletions (&lc, current);
 
 	// ... but beep if no common part or common part already matches current word
-	if (!comstr[0] || (comlen == (unsigned int) (end - start))) {
+	if (!comlen || (comlen == (unsigned int) (end - start))) {
 	  beep ();
 	}
       }
 
       // Otherwise complete word up to common part and stop here
-      insert_chars (current, current->pos, comstr + n);
+      if (comlen > n) {
+	insert_chars (current, current->pos, comstr + n);
+      }
       if (lc.len == 1) {
 	if (linenoise_completion_append_char) {
 	  if (current->buf[current->pos] != linenoise_completion_append_char) {
